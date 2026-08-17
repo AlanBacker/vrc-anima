@@ -32,7 +32,9 @@ ScreenGrabber            MicCapture ── VAD(silero/energy)── 断句
 
 ## 安装
 
-系统要求:Linux(X11 会话用于截屏),Python ≥ 3.11,`ffmpeg`(TTS 解码),`pulseaudio-utils`(pactl/parec/pacat,音频采集与播放),PipeWire(虚拟声卡)。
+系统要求:Linux(**Xorg 会话**),Python ≥ 3.11,`ffmpeg`(TTS 解码),`pulseaudio-utils`(pactl/parec/pacat,音频采集与播放),PipeWire(虚拟声卡)。
+
+> ⚠️ **Wayland 会话下抓屏只能拍到全黑**(Wayland 的安全模型禁止应用读取别的窗口,不报错、静默黑屏;bot 检测到会在日志点名)。请在登录界面齿轮处切换 Xorg 会话(如「Ubuntu on Xorg」;轻量桌面 Xorg + XFCE 实测良好)。Wayland 原生抓屏(portal + PipeWire)排在 M2。
 
 **方式一:uv(推荐)**
 
