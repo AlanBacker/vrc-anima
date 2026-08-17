@@ -1,0 +1,11 @@
+vrc-anima
+Copyright 2026 AlanBacker
+
+Licensed under the Apache License, Version 2.0.
+
+--------------------------------------------------------------------------
+
+This product bundles a vendored copy of `memstore.py` from
+astrbot_plugin_memory_beyond (https://github.com/AlanBacker/astrbot_plugin_memory_beyond),
+licensed under the MIT License, Copyright (c) 2026 AlanBacker.
+See src/anima/memory/memstore.py for the vendored file.

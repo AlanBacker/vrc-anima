@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+
+# Anima 运行时数据(记忆、缓存、账单)——默认不入库
+data/
+config.toml
+persona.md
+
+# 编辑器/系统
+.idea/
+.vscode/
+*.swp
+.DS_Store

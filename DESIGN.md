@@ -1,0 +1,239 @@
+# Anima 设计定稿
+
+> **版本** 1.2 草案 · **日期** 2026-08-17 · **状态** 待共识确认 · **作者** AlanBacker
+>
+> 本文档是一次系统性需求拷问(20 个决策点 + 5 份事实调查)的收敛结果。所有外部事实均于 2026-08-17 从官方文档/源码核实,未核实项统一标注 ⚠️ 并汇总于第 12 章。
+
+---
+
+## 0. 定位与设计原则
+
+**Anima** 是一个开源的 VRChat 具身 AI 智能体:通过**未修改的官方客户端 + OSC + 屏幕/音频捕获**,让任意多模态 LLM 以 Avatar 的身份存在于 VRChat 世界——能看、能听、能说、能动、能记。
+
+设计原则(按优先级):
+
+1. **不碰客户端**:只用 VRChat 官方提供的机制(OSC、启动参数)和外部观察(屏幕、音频、日志)。修改客户端是 ToS 红线,永不越过。
+2. **模型可插拔**:主路线是回合制多模态级联(`gemini-3.7-flash` 一类),实时路线(Gemini Live / OpenAI Realtime)是可选备胎。任何一层供应商(LLM/STT/TTS/网关)都可替换。
+3. **省 tokens 且灵动**:三态状态机 + 三档模式,"该看到就能看到,该省就省",账单上限攥在配置手里。
+4. **AstrBot 生态友好,但可独立运行**:不装 AstrBot 一样能跑;装了就获得 IM 指挥链、Provider 池与 memory_beyond 记忆生态。
+5. **不丢人**:内容安全、权限分层、急停链、AI 身份披露,从第一天就是设计的一部分,不是补丁。
+
+## 1. 系统拓扑
+
+```mermaid
+flowchart LR
+    subgraph HOST["VRChat 主机(Ubuntu + GPU)"]
+        VRC["VRChat 客户端<br/>(Steam Proton)"]
+        PW["PipeWire<br/>虚拟麦克风 / 游戏音频分接"]
+        CAP["屏幕捕获<br/>(Portal/PipeWire 或 X11)"]
+        CORE["Anima Core(Python)<br/>感知 · 大脑 · 执行器 · 控制台"]
+        VRC <-->|"OSC UDP 9000/9001"| CORE
+        VRC <--> PW
+        PW <--> CORE
+        CAP --> CORE
+    end
+    CORE <-->|"HTTPS / WSS"| LLM["模型侧:New API 网关<br/>/ Google / TTS 服务"]
+    CORE <-->|"本地 WebSocket"| BRIDGE["astrbot_plugin_anima<br/>(桥插件)"]
+    BRIDGE <--> ASTR["AstrBot<br/>(QQ/TG 指挥 · Provider 池<br/>· memory_beyond)"]
+```
+
+- **部署形态**:Anima Core 与 VRChat **同机运行**(捕获必须发生在渲染机上)。当前这台开发虚拟机仅用于开发,部署 = 在 VRChat 主机上 `git clone` + 安装依赖 + 运行。
+- **跨平台承诺**:核心为纯 Python(≥3.11),捕获层做平台适配(Linux X11/Wayland 双支持;Windows 留接口,社区可补)。
+- OSC 端口用启动参数写死:`--osc=9000:127.0.0.1:9001`,**不依赖 OSCQuery 自动发现**(Wine 下 mDNS/HTTP 行为未验证)。
+
+## 2. 感知层
+
+感知铁律(文档级结论):VRChat **不提供**任何关于其他玩家/世界的结构化数据,OSC 输出只有自己。Anima 的全部感知来源:
+
+| # | 来源 | 通道 | 说明 |
+|---|------|------|------|
+| 1 | 房间混合音频 | PipeWire 分接游戏输出 | 所有人声混在一条流,**无说话人标签**;本地 VAD(Silero,CPU)切句 → **STT 转写为文本**(默认路径,见下) |
+| 2 | 屏幕画面 | Wayland: xdg-desktop-portal + PipeWire screencast;X11: XSHM 抓屏 | 回合帧默认长边 768px(≈258 tokens);`snapshot` 工具取原生分辨率 |
+| 3 | 自身状态 | OSC 9001 输出 | Grounded、VelocityX/Y/Z、MuteSelf、Viseme 等,供执行器闭环与状态文字 |
+| 4 | 客户端日志尾随 ⚠️ | `output_log*.txt`(Proton prefix 内) | 玩家进出/换图事件与名字(VRCX 同款先例);路径与格式待实机验证 |
+
+**语音转文本(STT)**:切句音频默认先转写成文本再进大脑——转写文本同时就是对话历史的存储形态(上下文不可能逐回合重发旧音频)。STT 与 LLM/TTS 同级抽象、可插拔,**模型选择权在用户**:
+
+- **桥接时(推荐)**:STT 模型直接在 AstrBot 里选——默认**跟随 AstrBot 当前启用的 STT Provider**(`get_using_stt_provider_async`,每次调用实时解析:你在 AstrBot WebUI 里切换,Anima 立即跟着换);也可在桥控制台从 AstrBot 的 STT Provider 池中**锁定指定某一个**(比如 IM 消息用云端 Whisper、VRChat 锁本地 SenseVoice)。整段文件式转写正对 VAD 切句粒度,零格式适配。
+- **独立运行(没有 AstrBot 可选时)**:默认本地 SenseVoice-small——CPU 实时(10 秒音频 <1 秒)、中/英/日/韩/粤,零 API 成本;可换 faster-whisper(更广语种)或任意 OpenAI 兼容 `/v1/audio/transcriptions`(可走 New API)。
+- **TTS 同规则**:桥接时默认跟随 AstrBot 当前 TTS Provider、可锁定;独立时用 edge-tts。
+
+**音频出**:TTS/模型音频 → PipeWire 虚拟源 → VRChat 麦克风;游戏内关闭"Toggle Voice"后,`/input/Voice` 为推挽式(1=开麦 0=静音),说话时开、说完关。
+
+**回声抑制**:bot 的声音会经游戏混音被自己听见。v1 采用**半双工**:自己说话期间暂停切句(丢弃捕获);后续可加 AEC(webrtc-apm)升级为全双工。
+
+## 3. 大脑层
+
+`Brain` 抽象分两个契约,配置切换:
+
+### 3.1 TurnBrain(主路线,默认)
+
+一个回合 = `[整句转写文本(默认;可选附原生音频)+ 当前画面帧 + 状态文字 + 记忆索引]` → `文本回复 + 工具调用`。回复文本即说话内容(见第 4 章)。
+
+| 实现 | 协议 | 走 New API 网关 | 语音输入 | 备注 |
+|------|------|----------------|----------|------|
+| **Gemini 原生**(默认,`gemini-3.7-flash`) | `/v1beta/models/{m}:generateContent` | ✅(原生格式透传,支持 `x-goog-api-key`,官方 SDK 改 base_url 即用) | STT 文本(默认);可开原生音频听语气 | 输入 $0.75/1M(优惠价,2026-12-31 止,后 $1.50) |
+| OpenAI 兼容 chat | `/v1/chat/completions` | ✅ | STT 文本 | 任意网关聚合模型可用——含纯文本 LLM(关帧即纯聊天位) |
+| AstrBot Provider(路线③) | 经桥插件走 AstrBot 流水线 | — | AstrBot STT Provider(其流水线本就是文本) | 免费获得人格/内容安全级/记忆原生捕获;延迟最高 |
+
+> 账本(为什么 STT 是默认):Gemini 音频计 **32 tokens/秒**——10 秒话 ≈320 tokens,转写文本仅 ≈40–60 tokens,单条差 **5–8 倍**;更硬的理由是**历史**:上下文必须以文本形态保存往轮内容(逐回合重发旧音频不可接受),转写横竖都得做。原生音频因此只是"当回合额外附一段音频听语气"的增强开关(默认关),不是绕开 STT 的路。
+
+延迟预期:话音落 → 开口 **1.5–3 秒**(VAD 收尾 + STT(本地 <1 秒)+ 上传 + TTFT + TTS 首块)。TTS 默认 edge-tts(免费),可换 AstrBot 的 12 种 TTS Provider 或 Gemini TTS。
+
+### 3.2 RealtimeBrain(备用,可选)
+
+亚秒级抢话体验需要时启用。事实约束(2026-08-17 核实):
+
+- **Gemini Live**(`gemini-3.1-flash-live-preview`):原生音频双向 + 1 FPS 视频 + 函数调用(**阻塞式**——工具必须立即返回)。**New API 不代理 Live WebSocket**(仓库无 bidi 路由,feature request #2446 处于 Stale)→ **只能直连 Google**,需可用地区访问路径。必修管道:上下文压缩(否则音+视频会话仅 2 分钟)、~10 分钟 WS 强制重连、恢复句柄(2h 有效)。旧款 `gemini-2.5-flash-native-audio` 支持非阻塞工具与主动开口,配置可选。
+- **OpenAI Realtime 兼容**:**可走 New API**(`wss://…/v1/realtime`,2024-11 起,仅 WS 传输)。模态 = 音频 + 文本 + **逐帧图片**(`input_image` 会话项),**无视频轨**——视觉以"往会话里塞图"的方式实现。
+- 未来方言适配(社区向):Qwen-Omni-Realtime、GLM-Realtime——OpenAI 风格 WS + 各自私有的视频帧事件,国内可直连。
+
+> 行业事实:截至 2026-08,**不存在**任何"实时 + 视频流"的开放标准;各家帧注入事件互不兼容。这正是级联主路线的护城河——HTTP 回合制在任何网关/供应商处都通行。
+
+## 4. 行动层
+
+**说话不是工具。** 模型的文本输出(或 Live 音频输出)就是说话内容,执行器自动完成 TTS → 开麦 → 播放 → 闭麦,并将文本镜像到聊天框(144 字符/条,漏桶 ≤5 条/5 秒,自动分条;中文 UTF-8 ⚠️ 待实机验证)。Live 路线的字幕来自输出转写(output transcription)。想说就说,零工具开销。
+
+工具 = 纯动作 + 记忆,全部**立即返回、本地异步执行**(兼容 Live 的阻塞式函数调用):
+
+| 工具 | OSC 实现 | 说明 |
+|------|----------|------|
+| `move(direction, seconds)` | `/input/MoveForward` 等按键,时长封顶 5s | 前/后/左/右 |
+| `turn(degrees)` | `/input/LookHorizontal` 定时脉冲 | 角速度需实机标定 |
+| `look_pitch(degrees)` ⚠️ | `/input/LookVertical` | 官方文档缺失、更新日志承认存在;实机验证不通则砍 |
+| `jump()` / `set_run(on)` | `/input/Jump`、`/input/Run` | 按键需 1→0 复位 |
+| `emote(name)` ⚠️ | `/avatar/parameters/*` | 映射表随 Avatar 配置;依赖所选 Avatar 的参数 |
+| `snapshot()` | — | 主动索要一张原生分辨率画面 |
+| `stop_all()` | 全轴清零 | 停止一切动作 |
+| `memory_read / memory_search / memory_write` | — | 见第 6 章 |
+
+**不给模型的能力**(仅控制台/桥):panic(`/input/PanicButton` 安全模式)、强制静音、换世界(`vrchat://launch` 重启进图)、关机。
+
+OSC 硬约束备忘:桌面模式**无法交互**(Use/Grab/Drop 全部 VR-Only)、无蹲伏;轴值不清零会永远走下去——执行器兜底看门狗:任何动作超时强制清零。
+
+## 5. 状态机与模式
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    IDLE: IDLE 待机<br/>本地 VAD + 行为引擎<br/>成本 ≈ 0
+    ALERT: ALERT 警觉<br/>一次纯文本判定<br/>≈ $0.0002/次
+    ENGAGED: ENGAGED 对话<br/>级联 ≈ $0.002/回合<br/>(冷场不计费)
+    IDLE --> ALERT: 人声/叫名/画面剧变
+    ALERT --> ENGAGED: 判定"在跟我说话"
+    ALERT --> IDLE: 误报
+    ENGAGED --> IDLE: 冷场 N 秒
+    IDLE --> ENGAGED: 桥指令/唤醒词
+```
+
+| 模式 | 迁移策略 | 适用 |
+|------|----------|------|
+| 常开 | 永远 ENGAGED | 演示、活动 |
+| **门控(默认)** | 三态自动迁移 | 日常挂机 |
+| 唤醒 | 禁止自动进 ENGAGED,仅唤醒词(默认=bot 名字)或桥指令 | 极限省钱 |
+
+- **STT 常驻的红利**:唤醒词/叫名检测 = 本地转写文本匹配,**零 API 成本**;ALERT 的"在跟我说话吗"判定默认纯文本(不带帧),≈$0.0002/次。
+- **闲逛/张望**等待机小动作由本地行为引擎(纯脚本)执行,不过模型。
+- 可选**思考心跳**:IDLE 态每 N 分钟一次级联调用(看快照,决定是否干点什么),自主性与账单同时可控。
+- **自主性开关**(用户配置):待机行为(默认开)/主动搭话(默认关,仅好友)/自主换图(不提供给模型)。
+- 级联对 Live 的成本优势本质:**按回合计费,沉默免费**;Live 按分钟持续计费(≈$0.5–1/小时)。
+
+## 6. 记忆
+
+沿用 **memory_beyond**(作者同为 AlanBacker)的文件协议:纯 Markdown + frontmatter,一事一文件,自动同步 `MEMORY.md` 索引;核心逻辑 `core/memstore.py` 零依赖、MIT——**vendor 进 Anima Core**(MIT→Apache-2.0 兼容)。
+
+- **读**:会话记忆索引注入系统提示词;`memory_read/search/write` 作为 Anima 自己的工具声明暴露给模型(源码核实:插件的写入路径焊死在 AstrBot LLM 流水线上,无外部投喂入口,故由 Anima 自持工具,插件零改动)。
+- **写**:桥接时经插件进程内 `ScopeStore` 写并失效其索引缓存(避免跨进程竞态);独立运行时核心直接读写同格式文件。
+- **跨源共享**:桥插件以自选共享 session key 打通 VRChat 会话与 IM 会话——"QQ 里聊过的事,VRChat 里记得"(默认开)。
+- 已知限制:检索为子串匹配(无语义召回);插件内置引导语硬编码中文。
+
+## 7. 权限与安全
+
+**语音无法鉴权**(混合音频,无说话人分离)→ 三层权限:
+
+| 层 | 通道 | 允许 |
+|----|------|------|
+| 不可信 | 世界内语音/聊天 | 对话、动作八件套、记忆读写 |
+| 可信 | 桥控制台 / AstrBot 指令(鉴权) | 换图、改人设、调模式、静音、关机、配额 |
+| 急停 | 本地热键 + 桥命令 + `/input/PanicButton` | 绕过所有智能层,瞬间静音+停动作 |
+
+- **提示注入防线**:世界内语音永远以"不可信用户内容"身份进上下文;管理指令词表在系统提示词中明确拒绝来自语音的触发。
+- **内容安全**:系统提示词基线 + Gemini safety settings + 输出过滤;路线③额外免费获得 AstrBot 内容安全级。
+- **身份披露**:bot 账号资料页标注 AI(账号设置,写入 README 强烈建议);人设由用户自定义(`persona.md`),多语言自动跟随对方。
+- 隐私边界写入 README:会话记忆默认本地、不建陌生人档案。
+
+## 8. 控制台与 AstrBot 桥
+
+- **M1**:CLI 控制台(状态/模式/说话代打/静音/panic/进图/配额监视)。
+- **M2**:本地 Web 控制台(FastAPI,localhost),实时字幕、画面预览、成本仪表。
+- **M3**:`astrbot_plugin_anima` 桥插件——本地 WS 连核心;IM 指令镜像控制台全集;**STT/TTS Provider 选择器**(枚举 AstrBot Provider 池,跟随或锁定,即选即生效);事件推送(有人搭话/异常/账单);路线③代理;记忆流胶水(约 100–200 行)。
+
+## 9. 开源交付
+
+| 项 | 决策 |
+|----|------|
+| 仓库 | 双仓库:`vrc-anima`(核心)+ `astrbot_plugin_anima`(桥,按插件市场惯例独立) |
+| 许可证 | 核心 **Apache-2.0**;桥插件 **AGPL-3.0**(与 AstrBot 生态一致) |
+| 署名 | AlanBacker |
+| README 必含 | ToS 姿态声明、AI 披露建议、隐私边界、账单预期表、已知限制 |
+
+## 10. 里程碑与验收
+
+| 里程碑 | 内容 | 验收标准 |
+|--------|------|----------|
+| **M1 骨架**(1–2 周) | Proton+OSC 跑通;PipeWire 双向音频;VAD→STT→`gemini-3.7-flash`(**含视觉帧**)→TTS 回合环;动作工具;CLI 控制台;半双工回声抑制 | 进私人房间:语音对话流畅;"走过来跳一下"执行正确;"我手里拿的是什么?"答得上来 |
+| **M2 感知完全体** | 门控三态状态机;Wayland/X11 双捕获;emote/转身标定;Web 控制台;OpenAI 兼容路线 | 门控模式下挂机 2 小时,账单符合预期,被搭话能自动醒 |
+| **M3 生态** | AstrBot 桥插件;记忆流;路线③;Live 备胎路线(直连);唤醒模式 | QQ 里远程指挥;昨天聊过的人今天被记得;切 Live 模式延迟 <1s |
+| **M4 发布** | 双仓库、文档、配置模板、演示视频 | 陌生人按 README 30 分钟内跑起来 |
+
+## 11. 风险清单
+
+| 风险 | 影响 | 缓解 |
+|------|------|------|
+| ToS 灰区("自动化手段"条款) | bot 账号封禁 | 务实姿态:不改客户端、专用账号、披露 AI、限速礼貌;最坏损失一个账号 |
+| Live 模型 preview 状态、SDK 变动(google-genai 已预告 API 变更) | 备胎路线返工 | 主路线不依赖 Live;SDK 锁版本;Provider 抽象 |
+| 无说话人分离 | 认错人、被冒充指挥 | 语音=不可信层;管理指令只走桥 |
+| 嘈杂混音下 STT 误转写(多人重叠、世界 BGM) | 听错、答非所问 | VAD 切句;系统提示词声明"转写可能含错,请容错";重要场景可开原生音频开关 |
+| Proton 非官方支持 | 客户端更新偶发故障 | 社区验证 2024 末起稳定;故障期可切 Windows 机(捕获层留接口) |
+| 1.5–3s 级联延迟 | 对话不够"抢话" | 预期管理 + Live 备胎一键切换 |
+| memory_beyond 依赖其下划线私有 API | 版本升级破裂 | vendor 零依赖的 memstore.py;插件作者即本人 |
+| Gemini API 大陆不可用 | 主模型断供 | New API 网关聚合 + OpenAI 兼容路线 + 国产实时方言适配位 |
+| 成本失控 | 账单爆炸 | 模式档位 + 思考心跳频率 + 控制台配额监视 + 每日额度熔断(配置) |
+
+## 12. 实机验证清单(第一次部署时逐项打勾)
+
+- [ ] `/input/LookVertical` 桌面模式抬头低头是否生效(决定 `look_pitch` 去留)
+- [ ] 聊天框 OSC 中文(UTF-8)显示
+- [ ] Proton 下 `--osc` 启动参数与 UDP 9000/9001 连通性
+- [ ] PipeWire 捕获 Proton 窗口(Wayland portal 授权的免交互持久化)
+- [ ] 虚拟麦克风被 VRChat(Wine 音频栈)识别为输入设备
+- [ ] `turn()` 角速度标定(度/秒)
+- [ ] 所选 Avatar 的参数表 → `emote` 映射配置
+- [ ] `output_log*.txt` 在 Proton prefix 下的路径与玩家进出事件格式
+- [ ] 半双工模式下回声残留程度(决定是否提前上 AEC)
+- [ ] SenseVoice-small 在 VRChat 主机 CPU 上的实时率与嘈杂房间转写质量(定默认 STT 档位)
+
+## 附录 A · 决策记录(拷问会话 Q1–Q20)
+
+| # | 问题 | 拍板 |
+|---|------|------|
+| Q1 | bot 类型 | 世界内多模态 AI 智能体 |
+| Q2 | 受众 | 个人项目,开源,高质量 |
+| Q3 | 目标形态 | 语音/后台/自主三源驱动,接 AstrBot 生态 |
+| Q4 | 合规姿态 | 务实:官方客户端 + OSC + 屏幕观察,不碰无头/改客户端 |
+| Q5 | 平台 | 跨平台方案,本地运行,Python |
+| Q6 | 账号 | 已有足够等级的 bot 账号 |
+| Q7 | 拓扑 | 与 VRChat 同机部署;X11/Wayland 双支持 |
+| Q8 | 人设语言 | 多语言自动;人设用户自定义 |
+| Q9 | 感知模式 | 常开/门控/唤醒三档全做,默认门控 |
+| Q10 | 动作抽象 | v1 离散原语,接口为连续意图预留 |
+| Q11 | 自主边界 | 用户配置开关(默认保守) |
+| Q12 | 权限 | 语音不可信;管理走桥控制台;三级急停 |
+| Q13 | 记忆 | memory_beyond 文件协议,vendor 核心 + 桥胶水 |
+| Q14 | AstrBot 形态 | Bridge:独立核心 + 薄桥插件 |
+| Q15 | 模型接入 | New API 网关优先,多路线可插拔;**级联多模态为主,Live 为备** |
+| Q16 | 命名 | **Anima**(`vrc-anima` / `astrbot_plugin_anima`),署名 AlanBacker |
+| Q17 | 仓库/许可证 | 双仓库;Apache-2.0 + AGPL-3.0 |
+| Q18 | 说话机制 | 说话即输出,非工具;工具=动作+记忆 |
+| Q19 | 里程碑 | M1 级联骨架(含视觉)→ M2 感知 → M3 生态+Live → M4 发布 |
+| Q20 | 语音输入通路 | **STT 转写为默认**;桥接时 STT 模型由用户在 AstrBot 里选(默认跟随其当前启用项,可锁定指定项);独立默认本地 SenseVoice-small;原生音频降为可选增强开关 |

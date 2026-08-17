@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vrc-anima"
+version = "0.1.0.dev0"
+description = "VRChat 具身 AI 智能体:官方客户端 + OSC + 屏幕/音频捕获,让多模态 LLM 以 Avatar 身份存在于虚拟世界"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "AlanBacker" }]
+keywords = ["vrchat", "osc", "llm", "agent", "gemini", "embodied-ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Communications :: Chat",
+    "Topic :: Games/Entertainment",
+]
+dependencies = [
+    "python-osc>=1.9",
+    "numpy>=1.26",
+    "httpx>=0.27",
+    "google-genai>=2.18",
+    "edge-tts>=6.1",
+    "mss>=9.0",
+    "Pillow>=10.0",
+    "sounddevice>=0.5",
+    "onnxruntime>=1.20",
+]
+
+[project.optional-dependencies]
+# 本地 SenseVoice-small STT(独立运行的默认档;桥接 AstrBot 时无需安装)
+stt-local = ["funasr>=1.2"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.urls]
+Homepage = "https://github.com/AlanBacker/vrc-anima"
+Design = "https://github.com/AlanBacker/vrc-anima/blob/main/DESIGN.md"
+
+[project.scripts]
+anima = "anima.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+anima = ["py.typed"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
