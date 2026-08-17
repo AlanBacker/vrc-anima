@@ -121,7 +121,7 @@ class StateConfig:
 
 @dataclass
 class CalibrationConfig:
-    turn_deg_per_sec: float = 90.0   # ⚠️ 实机标定:LookHorizontal 满轴角速度
+    turn_deg_per_sec: float = 180.0  # LookHorizontal 满轴角速度(桌面模式实测 ≈180;不准就用控制台 turn/cal 标)
     enable_look_pitch: bool = True   # ⚠️ /input/LookVertical 实测不通则关
     look_deg_per_sec: float = 90.0
     move_max_seconds: float = 5.0    # 单次 move 时长封顶(安全绳)

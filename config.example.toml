@@ -71,7 +71,7 @@ engaged_idle_timeout_s = 60.0
 wakeword = ""             # 空=用 core.name
 
 [calibration]
-turn_deg_per_sec = 90.0   # ⚠️ 实机标定:LookHorizontal 满轴每秒转多少度
+turn_deg_per_sec = 180.0  # LookHorizontal 满轴每秒转多少度(桌面模式实测 ≈180;不准就用控制台 turn 360 + cal turn 标定)
 enable_look_pitch = true  # ⚠️ /input/LookVertical 实测不生效就改 false
 look_deg_per_sec = 90.0
 move_max_seconds = 5.0
