@@ -11,12 +11,16 @@ import logging
 import math
 import sys
 
+from anima.brain.base import ToolCall
+
 log = logging.getLogger(__name__)
 
 HELP = """\
 可用命令:
   state           当前状态(模式/阶段/OSC/成本)
   mic             实时输入电平条(回车退出;显示电平/VAD 得分/说话段)
+  turn <度数>      直接转身,不过大脑(正=右转,负=左转;标定用)
+  cal             查看标定值;cal turn|look <值> 运行时调整(度/秒)
   stop            立刻停止所有动作(清零所有轴)
   panic           急停:停动作 + 打断说话 + Avatar 安全模式
   mute on|off     开/关麦克风(OSC Voice)
@@ -31,7 +35,7 @@ HELP = """\
 
 class Console:
     """app 需要提供:status_text() / stop_actions() / panic() / set_mute(bool)
-    / say(text) / cost / memory(可为 None)/ request_shutdown()。"""
+    / say(text) / cost / memory(可为 None)/ executor / cfg / request_shutdown()。"""
 
     def __init__(self, app):
         self._app = app
@@ -74,6 +78,16 @@ class Console:
             follow_up = await self._mic_meter()
             if follow_up:
                 return await self._dispatch(follow_up)
+        elif cmd in ("turn", "转"):
+            try:
+                degrees = float(rest)
+            except ValueError:
+                print("用法:turn <度数>(正=右转,负=左转,如 turn 90 / turn -45)", flush=True)
+            else:
+                result = app.executor.dispatch(ToolCall("turn", {"degrees": degrees}))
+                print(result.get("detail", str(result)), flush=True)
+        elif cmd in ("cal", "标定"):
+            self._calibrate(rest)
         elif cmd in ("stop", "停"):
             await app.stop_actions()
             print("已停止所有动作。", flush=True)
@@ -113,6 +127,33 @@ class Console:
         else:
             print(f"未知命令:{cmd}(help 看帮助)", flush=True)
         return False
+
+    # ---------------------------------------------------------- 转身标定
+
+    def _calibrate(self, rest: str) -> None:
+        cal = self._app.cfg.calibration
+        if not rest:
+            print(
+                f"turn_deg_per_sec = {cal.turn_deg_per_sec:g}\n"
+                f"look_deg_per_sec = {cal.look_deg_per_sec:g}\n"
+                "调法:cal turn <值>(换算:新值 = 当前值 × 实转度数 ÷ 目标度数)",
+                flush=True,
+            )
+            return
+        key, _, raw = rest.partition(" ")
+        attr = {"turn": "turn_deg_per_sec", "look": "look_deg_per_sec"}.get(key)
+        try:
+            value = float(raw)
+        except ValueError:
+            value = 0.0
+        if attr is None or value <= 0:
+            print("用法:cal turn <正数> | cal look <正数>", flush=True)
+            return
+        setattr(cal, attr, value)
+        print(
+            f"{attr} = {value:g}(仅本次运行;满意后写进 config.toml 的 [calibration])",
+            flush=True,
+        )
 
     # ---------------------------------------------------------- 实时电平条
 
