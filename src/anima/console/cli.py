@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 HELP = """\
 可用命令:
   state           当前状态(模式/阶段/OSC/成本)
+  mic             听觉自检(采集设备/输入电平/排查提示)
   stop            立刻停止所有动作(清零所有轴)
   panic           急停:停动作 + 打断说话 + Avatar 安全模式
   mute on|off     开/关麦克风(OSC Voice)
@@ -66,6 +67,8 @@ class Console:
             print(HELP, flush=True)
         elif cmd in ("state", "状态"):
             print(app.status_text(), flush=True)
+        elif cmd in ("mic", "听觉"):
+            print(app.mic_text(), flush=True)
         elif cmd in ("stop", "停"):
             await app.stop_actions()
             print("已停止所有动作。", flush=True)

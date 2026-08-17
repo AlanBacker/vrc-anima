@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from pathlib import Path
 
@@ -335,6 +336,35 @@ class Anima:
 
     # ================================================================ 控制台接口
 
+    def _mic_level_text(self) -> str:
+        """输入通路诊断:parec 有没有吐帧、帧里有没有声音。"""
+        n = self.capture.frames_total
+        if n == 0:
+            return "无数据(parec 没吐出任何帧)"
+        rms = self.capture.level_rms
+        if rms < 1e-6:
+            return f"纯静音(已收 {n} 帧——设备在采,但没有声音流入)"
+        return f"{20 * math.log10(rms):.0f} dB(已收 {n} 帧)"
+
+    def mic_text(self) -> str:
+        if not self._capture_ok:
+            return "听觉不可用:启动时采集就失败了,翻启动日志看原因。"
+        dev = self.cfg.audio.input_device or "默认音源"
+        lines = [
+            f"采集设备:{dev}",
+            f"门控:{'关(bot 说话/回声尾,暂不收音)' if self.capture.gated else '开(正常收音)'}",
+            f"输入电平:{self._mic_level_text()}",
+        ]
+        if self.capture.frames_total and self.capture.level_rms < 1e-6:
+            lines += [
+                "→ 采集本身在跑,但进来的全是静音,说明声音没有路由到这个设备:",
+                "   1) pactl list short sinks 确认虚拟声卡还在(重启后要重新 load-module)",
+                "   2) 让游戏正在出声时开 pavucontrol → Playback 页,把 VRChat 的输出切到",
+                "      对应虚拟声卡(游戏重启后流会重建,之前设过的可能已失效)",
+                "   3) pavucontrol → Output Devices 页看该声卡电平条是否随声音跳动",
+            ]
+        return "\n".join(lines)
+
     def status_text(self) -> str:
         cfg = self.cfg
         if not self._capture_ok:
@@ -342,7 +372,7 @@ class Anima:
         elif self.capture.gated:
             hearing = "说话门控中"
         else:
-            hearing = "开"
+            hearing = f"开(电平 {self._mic_level_text()})"
         lines = [
             f"名字:{cfg.core.name}(大脑 {cfg.brain.gemini.model},STT {cfg.stt.provider})",
             f"参与:{self.state.describe()}",

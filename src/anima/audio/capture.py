@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import subprocess
 import threading
 from typing import AsyncIterator
@@ -47,6 +48,10 @@ class MicCapture:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopping = False
         self._dropped = 0
+        # 诊断用(读取线程写、任意线程读;标量赋值在 GIL 下安全):
+        self.frames_total = 0     # 收到的原始帧数(含门控期丢弃的)
+        self.level_rms = 0.0      # 近 1 秒 RMS 峰值(线性 0..1,衰减保持)
+        self._heard_signal = False
 
     def start(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -129,12 +134,18 @@ class MicCapture:
             data = proc.stdout.read(frame_bytes)
             if not data or len(data) < frame_bytes:
                 break
+            frame = np.frombuffer(data, dtype=np.float32)
+            self.frames_total += 1
+            rms = float(np.sqrt(np.mean(frame * frame)))
+            self.level_rms = max(rms, self.level_rms * 0.9)
+            if not self._heard_signal and rms > 1e-4:
+                self._heard_signal = True
+                log.info("听觉通路有信号了(%.0f dB)", 20 * math.log10(rms))
             if self._gated:
                 continue
-            frame = np.frombuffer(data, dtype=np.float32).copy()
             loop = self._loop
             if loop is not None and not loop.is_closed():
-                loop.call_soon_threadsafe(self._put, frame)
+                loop.call_soon_threadsafe(self._put, frame.copy())
         if not self._stopping:
             err = b""
             try:
