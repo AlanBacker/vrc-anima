@@ -336,6 +336,10 @@ class Anima:
 
     # ================================================================ 控制台接口
 
+    @property
+    def capture_ok(self) -> bool:
+        return self._capture_ok
+
     def _mic_level_text(self) -> str:
         """输入通路诊断:parec 有没有吐帧、帧里有没有声音。"""
         n = self.capture.frames_total

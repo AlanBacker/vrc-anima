@@ -50,6 +50,7 @@ class MicCapture:
         self._dropped = 0
         # 诊断用(读取线程写、任意线程读;标量赋值在 GIL 下安全):
         self.frames_total = 0     # 收到的原始帧数(含门控期丢弃的)
+        self.level_now = 0.0      # 最近一帧 RMS(线性 0..1,瞬时)
         self.level_rms = 0.0      # 近 1 秒 RMS 峰值(线性 0..1,衰减保持)
         self._heard_signal = False
 
@@ -137,6 +138,7 @@ class MicCapture:
             frame = np.frombuffer(data, dtype=np.float32)
             self.frames_total += 1
             rms = float(np.sqrt(np.mean(frame * frame)))
+            self.level_now = rms
             self.level_rms = max(rms, self.level_rms * 0.9)
             if not self._heard_signal and rms > 1e-4:
                 self._heard_signal = True

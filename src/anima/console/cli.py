@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import sys
 
 log = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ log = logging.getLogger(__name__)
 HELP = """\
 可用命令:
   state           当前状态(模式/阶段/OSC/成本)
-  mic             听觉自检(采集设备/输入电平/排查提示)
+  mic             实时输入电平条(回车退出;显示电平/VAD 得分/说话段)
   stop            立刻停止所有动作(清零所有轴)
   panic           急停:停动作 + 打断说话 + Avatar 安全模式
   mute on|off     开/关麦克风(OSC Voice)
@@ -34,6 +35,7 @@ class Console:
 
     def __init__(self, app):
         self._app = app
+        self._reader: asyncio.StreamReader | None = None
 
     async def run(self) -> None:
         try:
@@ -41,6 +43,7 @@ class Console:
         except (OSError, ValueError) as e:
             log.info("stdin 不可用(%s),控制台停用", e)
             return
+        self._reader = reader
         print("Anima 控制台就绪,输入 help 看命令。", flush=True)
         while True:
             raw = await reader.readline()
@@ -68,7 +71,9 @@ class Console:
         elif cmd in ("state", "状态"):
             print(app.status_text(), flush=True)
         elif cmd in ("mic", "听觉"):
-            print(app.mic_text(), flush=True)
+            follow_up = await self._mic_meter()
+            if follow_up:
+                return await self._dispatch(follow_up)
         elif cmd in ("stop", "停"):
             await app.stop_actions()
             print("已停止所有动作。", flush=True)
@@ -108,6 +113,90 @@ class Console:
         else:
             print(f"未知命令:{cmd}(help 看帮助)", flush=True)
         return False
+
+    # ---------------------------------------------------------- 实时电平条
+
+    async def _mic_meter(self) -> str:
+        """实时刷新输入电平,回车退出。
+
+        返回退出时用户顺手敲的命令(空串=纯回车),交还 _dispatch 执行。
+        """
+        app = self._app
+        if not app.capture_ok:
+            print(app.mic_text(), flush=True)
+            return ""
+        cap = app.capture
+        seg = app.segmenter
+        dev = app.cfg.audio.input_device or "默认音源"
+        print(
+            f"实时输入电平(设备:{dev},VAD 阈值 {seg.threshold:.2f})——按回车退出",
+            flush=True,
+        )
+
+        stop = (
+            asyncio.ensure_future(self._reader.readline())
+            if self._reader is not None
+            else None
+        )
+        session_peak = 0.0
+        last_frames = cap.frames_total
+        stalled_ticks = 0
+        ticks = 0
+        line = b""
+        try:
+            while True:
+                if stop is not None:
+                    done, _ = await asyncio.wait({stop}, timeout=0.1)
+                    if done:
+                        line = stop.result()
+                        break
+                else:  # stdin 异常时的兜底:跑 10 秒自动停
+                    await asyncio.sleep(0.1)
+                    if ticks >= 100:
+                        break
+                ticks += 1
+                session_peak = max(session_peak, cap.level_rms)
+                if cap.frames_total == last_frames:
+                    stalled_ticks += 1
+                else:
+                    stalled_ticks = 0
+                    last_frames = cap.frames_total
+                sys.stdout.write("\r\x1b[K" + self._meter_line(cap, seg, stalled_ticks))
+                sys.stdout.flush()
+        finally:
+            if stop is not None and not stop.done():
+                stop.cancel()
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+        if session_peak < 1e-6:
+            # 整个观察期一点声音都没有:直接给路由排查提示
+            print(app.mic_text(), flush=True)
+        return line.decode("utf-8", "replace").strip()
+
+    @staticmethod
+    def _meter_line(cap, seg, stalled_ticks: int) -> str:
+        width = 30
+        floor = -60.0  # 显示下限 dBFS
+        rms = cap.level_now
+        db = 20 * math.log10(rms) if rms > 1e-9 else floor
+        peak = cap.level_rms
+        db_peak = 20 * math.log10(peak) if peak > 1e-9 else floor
+        filled = max(0, min(width, round((db - floor) / -floor * width)))
+        peak_pos = max(0, min(width - 1, round((db_peak - floor) / -floor * width) - 1))
+        bar = ["█"] * filled + ["░"] * (width - filled)
+        if peak > 1e-6 and peak_pos >= filled:
+            bar[peak_pos] = "▌"  # 近 1 秒峰值游标
+        level = " 静音 " if rms < 1e-6 else f"{db:4.0f}dB"
+        if stalled_ticks > 10:
+            status = "⚠ 无数据流(parec 没在吐帧)"
+        elif cap.gated:
+            status = "门控中(bot 在说话)"
+        elif seg.in_speech:
+            status = f"VAD {seg.last_prob:.2f} ●说话段"
+        else:
+            status = f"VAD {seg.last_prob:.2f}"
+        return f"[{''.join(bar)}] {level}  {status}"
 
     @staticmethod
     async def _stdin_reader() -> asyncio.StreamReader:

@@ -152,7 +152,12 @@ class UtteranceSegmenter:
         # 预滚环得装下 pre-roll + 开口去抖期间的全部帧,否则起头会被吃掉
         ring = (pre_roll_ms + self._min_speech_ms) // FRAME_MS + 2
         self._pre: deque[np.ndarray] = deque(maxlen=ring)
+        self.last_prob = 0.0  # 最近一帧的 VAD 得分(诊断/电平表用)
         self._reset_runs()
+
+    @property
+    def threshold(self) -> float:
+        return self._threshold
 
     def _reset_runs(self) -> None:
         self._active = False
@@ -171,7 +176,8 @@ class UtteranceSegmenter:
         return self._active
 
     def feed(self, frame: np.ndarray) -> np.ndarray | None:
-        speaking = self._vad(frame) >= self._threshold
+        self.last_prob = float(self._vad(frame))
+        speaking = self.last_prob >= self._threshold
 
         if not self._active:
             self._pre.append(frame)
