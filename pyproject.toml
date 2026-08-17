@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# 本地 SenseVoice-small STT(独立运行的默认档;桥接 AstrBot 时无需安装)
+# 本地 SenseVoice-small STT(默认档;改用 openai 兼容端点则无需安装)
 stt-local = ["funasr>=1.2"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 

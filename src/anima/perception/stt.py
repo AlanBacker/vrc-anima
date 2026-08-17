@@ -1,11 +1,9 @@
 """STT 转写:语音段 → 文本(默认路径,见 DESIGN.md Q20)。
 
-三个 provider:
+两个 provider:
 - sensevoice:本地 SenseVoice-small(funasr),CPU 实时,中英日韩粤,
-  独立运行的默认;需要 extras:pip install "vrc-anima[stt-local]"
+  默认;需要 extras:pip install "vrc-anima[stt-local]"
 - openai:OpenAI 兼容 /v1/audio/transcriptions(经 New API 网关等)
-- astrbot:跟随 AstrBot 当前启用的 STT Provider——桥接在 M3 提供,
-  M1 选它会明确报错,不做静默降级
 
 转写选择权在用户(设计决策 Q20):Anima 不越权替用户选模型。
 """
@@ -151,7 +149,7 @@ class OpenAiStt:
 
 
 def build_stt(cfg: SttConfig):
-    """按配置构建 STT 引擎。astrbot 桥接是 M3 的活,现在选它直接说清楚。"""
+    """按配置构建 STT 引擎。"""
     if cfg.provider == "sensevoice":
         return SenseVoiceStt(language=cfg.language)
     if cfg.provider == "openai":
@@ -160,10 +158,5 @@ def build_stt(cfg: SttConfig):
             api_key=cfg.resolved_api_key(),
             model=cfg.model,
             language=cfg.language,
-        )
-    if cfg.provider == "astrbot":
-        raise ConfigError(
-            "[stt] provider=astrbot(跟随 AstrBot 的 STT Provider)在 M3 桥接里提供;"
-            "M1 独立运行请用 sensevoice(本地)或 openai(网关)"
         )
     raise ConfigError(f"[stt] 未知 provider:{cfg.provider}")

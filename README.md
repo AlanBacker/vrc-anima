@@ -105,7 +105,7 @@ export GEMINI_API_KEY=...             # 或 config.toml [brain.gemini] api_key
 |---|---|---|
 | `[core]` | `name` | 她的名字,也是唤醒词 |
 | `[brain.gemini]` | `model` / `base_url` | 默认 `gemini-3.7-flash`;经 New API 等网关时填网关地址 |
-| `[stt]` | `provider` | `sensevoice`(本地)/ `openai`(兼容接口)/ `astrbot`(M3 桥接) |
+| `[stt]` | `provider` | `sensevoice`(本地)/ `openai`(兼容接口) |
 | `[state]` | `mode` | `always_on` 常开 / `gated` 门控 / `wakeword` 唤醒词 |
 | `[limits]` | `daily_usd` | 每日预算熔断,默认 0=不设限;填数额则超线暂停回应(`budget reset` 解除) |
 | `[calibration]` | `turn_deg_per_sec` | 转身标定:实测你的灵敏度后填入 |
@@ -150,7 +150,7 @@ uv run pytest -q               # pip 装的用 .venv/bin/python -m pytest tests/
 
 - **M1(当前)**:Proton + OSC 跑通;双向音频;VAD→STT→大脑→TTS 回合环;动作工具;CLI 控制台;半双工回声抑制
 - **M2**:门控参与(旁听判断)、说话人分离、移动避障、Live API 低延迟通道(可选备用)
-- **M3**:AstrBot 桥接——共用 STT/TTS/记忆配置,VRChat 里认识的人 QQ 上也记得
+- **M3**:唤醒词模式、Live 低延迟备胎(直连)、记忆进阶(global 作用域注入、更强检索)。跨平台记忆共享不走桥接:memstore 是纯文件协议,别的 memory_beyond 兼容 bot 指向同一数据目录、同一 `session_key` 即互通
 
 ## 许可证与致谢
 

@@ -1,8 +1,10 @@
 # Anima 设计定稿
 
-> **版本** 1.2 草案 · **日期** 2026-08-17 · **状态** 待共识确认 · **作者** AlanBacker
+> **版本** 1.3 · **日期** 2026-08-18 · **状态** 共识已确认(v1.2,2026-08-17)+ v1.3 修订 · **作者** AlanBacker
 >
 > 本文档是一次系统性需求拷问(20 个决策点 + 5 份事实调查)的收敛结果。所有外部事实均于 2026-08-17 从官方文档/源码核实,未核实项统一标注 ⚠️ 并汇总于第 12 章。
+>
+> **v1.3 修订(2026-08-18):取消 AstrBot 桥接路线。** 实机开发中的判断:IM 消息框架的回合抽象与语音实时对话系统不匹配,桥的三项收益都有更简单的替代——记忆互通由 memory_beyond 文件协议直接达成(同数据目录 + 同 session key,零胶水);STT/TTS 一律用内建可插拔配置;远程指挥由 M2 Web 控制台承担。受影响条目就地标注 (v1.3)。
 
 ---
 
@@ -15,7 +17,7 @@
 1. **不碰客户端**:只用 VRChat 官方提供的机制(OSC、启动参数)和外部观察(屏幕、音频、日志)。修改客户端是 ToS 红线,永不越过。
 2. **模型可插拔**:主路线是回合制多模态级联(`gemini-3.7-flash` 一类),实时路线(Gemini Live / OpenAI Realtime)是可选备胎。任何一层供应商(LLM/STT/TTS/网关)都可替换。
 3. **省 tokens 且灵动**:三态状态机 + 三档模式,"该看到就能看到,该省就省",账单上限攥在配置手里。
-4. **AstrBot 生态友好,但可独立运行**:不装 AstrBot 一样能跑;装了就获得 IM 指挥链、Provider 池与 memory_beyond 记忆生态。
+4. **完全独立,不挂靠任何 bot 框架**(v1.3):STT/TTS/记忆全部内建可插拔;记忆沿用 memory_beyond 文件协议,与其他兼容程序共享数据目录即可互通,无需桥接。
 5. **不丢人**:内容安全、权限分层、急停链、AI 身份披露,从第一天就是设计的一部分,不是补丁。
 
 ## 1. 系统拓扑
@@ -33,9 +35,9 @@ flowchart LR
         CAP --> CORE
     end
     CORE <-->|"HTTPS / WSS"| LLM["模型侧:New API 网关<br/>/ Google / TTS 服务"]
-    CORE <-->|"本地 WebSocket"| BRIDGE["astrbot_plugin_anima<br/>(桥插件)"]
-    BRIDGE <--> ASTR["AstrBot<br/>(QQ/TG 指挥 · Provider 池<br/>· memory_beyond)"]
 ```
+
+>(v1.3:图中原有的 `astrbot_plugin_anima` 桥插件与 AstrBot 节点已随桥接路线取消。)
 
 - **部署形态**:Anima Core 与 VRChat **同机运行**(捕获必须发生在渲染机上)。当前这台开发虚拟机仅用于开发,部署 = 在 VRChat 主机上 `git clone` + 安装依赖 + 运行。
 - **跨平台承诺**:核心为纯 Python(≥3.11),捕获层做平台适配(Linux X11/Wayland 双支持;Windows 留接口,社区可补)。
@@ -54,9 +56,9 @@ flowchart LR
 
 **语音转文本(STT)**:切句音频默认先转写成文本再进大脑——转写文本同时就是对话历史的存储形态(上下文不可能逐回合重发旧音频)。STT 与 LLM/TTS 同级抽象、可插拔,**模型选择权在用户**:
 
-- **桥接时(推荐)**:STT 模型直接在 AstrBot 里选——默认**跟随 AstrBot 当前启用的 STT Provider**(`get_using_stt_provider_async`,每次调用实时解析:你在 AstrBot WebUI 里切换,Anima 立即跟着换);也可在桥控制台从 AstrBot 的 STT Provider 池中**锁定指定某一个**(比如 IM 消息用云端 Whisper、VRChat 锁本地 SenseVoice)。整段文件式转写正对 VAD 切句粒度,零格式适配。
-- **独立运行(没有 AstrBot 可选时)**:默认本地 SenseVoice-small——CPU 实时(10 秒音频 <1 秒)、中/英/日/韩/粤,零 API 成本;可换 faster-whisper(更广语种)或任意 OpenAI 兼容 `/v1/audio/transcriptions`(可走 New API)。
-- **TTS 同规则**:桥接时默认跟随 AstrBot 当前 TTS Provider、可锁定;独立时用 edge-tts。
+- 默认本地 SenseVoice-small——CPU 实时(10 秒音频 <1 秒)、中/英/日/韩/粤,零 API 成本;可换任意 OpenAI 兼容 `/v1/audio/transcriptions`(可走 New API;faster-whisper 等后续可加)。整段文件式转写正对 VAD 切句粒度,零格式适配。
+- **TTS 同规则**:默认 edge-tts(免费),provider 位可插拔。
+- (v1.3:原"桥接时跟随/锁定 AstrBot Provider 池"方案随桥接一并取消。)
 
 **音频出**:TTS/模型音频 → PipeWire 虚拟源 → VRChat 麦克风;游戏内关闭"Toggle Voice"后,`/input/Voice` 为推挽式(1=开麦 0=静音),说话时开、说完关。
 
@@ -74,11 +76,12 @@ flowchart LR
 |------|------|----------------|----------|------|
 | **Gemini 原生**(默认,`gemini-3.7-flash`) | `/v1beta/models/{m}:generateContent` | ✅(原生格式透传,支持 `x-goog-api-key`,官方 SDK 改 base_url 即用) | STT 文本(默认);可开原生音频听语气 | 输入 $0.75/1M(优惠价,2026-12-31 止,后 $1.50) |
 | OpenAI 兼容 chat | `/v1/chat/completions` | ✅ | STT 文本 | 任意网关聚合模型可用——含纯文本 LLM(关帧即纯聊天位) |
-| AstrBot Provider(路线③) | 经桥插件走 AstrBot 流水线 | — | AstrBot STT Provider(其流水线本就是文本) | 免费获得人格/内容安全级/记忆原生捕获;延迟最高 |
+
+>(v1.3:原表中"AstrBot Provider(路线③)"已随桥接取消。)
 
 > 账本(为什么 STT 是默认):Gemini 音频计 **32 tokens/秒**——10 秒话 ≈320 tokens,转写文本仅 ≈40–60 tokens,单条差 **5–8 倍**;更硬的理由是**历史**:上下文必须以文本形态保存往轮内容(逐回合重发旧音频不可接受),转写横竖都得做。原生音频因此只是"当回合额外附一段音频听语气"的增强开关(默认关),不是绕开 STT 的路。
 
-延迟预期:话音落 → 开口 **1.5–3 秒**(VAD 收尾 + STT(本地 <1 秒)+ 上传 + TTFT + TTS 首块)。TTS 默认 edge-tts(免费),可换 AstrBot 的 12 种 TTS Provider 或 Gemini TTS。
+延迟预期:话音落 → 开口 **1.5–3 秒**(VAD 收尾 + STT(本地 <1 秒)+ 上传 + TTFT + TTS 首块)。TTS 默认 edge-tts(免费),provider 位可换 Gemini TTS 等。
 
 ### 3.2 RealtimeBrain(备用,可选)
 
@@ -142,10 +145,10 @@ stateDiagram-v2
 
 沿用 **memory_beyond**(作者同为 AlanBacker)的文件协议:纯 Markdown + frontmatter,一事一文件,自动同步 `MEMORY.md` 索引;核心逻辑 `core/memstore.py` 零依赖、MIT——**vendor 进 Anima Core**(MIT→Apache-2.0 兼容)。
 
-- **读**:会话记忆索引注入系统提示词;`memory_read/search/write` 作为 Anima 自己的工具声明暴露给模型(源码核实:插件的写入路径焊死在 AstrBot LLM 流水线上,无外部投喂入口,故由 Anima 自持工具,插件零改动)。
-- **写**:桥接时经插件进程内 `ScopeStore` 写并失效其索引缓存(避免跨进程竞态);独立运行时核心直接读写同格式文件。
-- **跨源共享**:桥插件以自选共享 session key 打通 VRChat 会话与 IM 会话——"QQ 里聊过的事,VRChat 里记得"(默认开)。
-- 已知限制:检索为子串匹配(无语义召回);插件内置引导语硬编码中文。
+- **读**:会话记忆索引注入系统提示词;`memory_read/search/write` 作为 Anima 自己的工具声明暴露给模型。
+- **写**:核心经 vendor 的 `ScopeStore` 直接读写(一事一文件,索引自动同步)。
+- **跨源共享**(v1.3 免桥方案):文件协议本身就是互通层——任何 memory_beyond 兼容程序(比如一个 IM bot)指向**同一数据目录、同一 session key**,读写的就是同一份记忆,"QQ 里聊过的事,VRChat 里记得"不需要任何桥。
+- 已知限制:检索为子串匹配(无语义召回)。
 
 ## 7. 权限与安全
 
@@ -154,26 +157,26 @@ stateDiagram-v2
 | 层 | 通道 | 允许 |
 |----|------|------|
 | 不可信 | 世界内语音/聊天 | 对话、动作八件套、记忆读写 |
-| 可信 | 桥控制台 / AstrBot 指令(鉴权) | 换图、改人设、调模式、静音、关机、配额 |
-| 急停 | 本地热键 + 桥命令 + `/input/PanicButton` | 绕过所有智能层,瞬间静音+停动作 |
+| 可信 | 本地控制台(M1 CLI / M2 Web,鉴权) | 换图、改人设、调模式、静音、关机、配额 |
+| 急停 | 本地热键 + 控制台命令 + `/input/PanicButton` | 绕过所有智能层,瞬间静音+停动作 |
 
 - **提示注入防线**:世界内语音永远以"不可信用户内容"身份进上下文;管理指令词表在系统提示词中明确拒绝来自语音的触发。
-- **内容安全**:系统提示词基线 + Gemini safety settings + 输出过滤;路线③额外免费获得 AstrBot 内容安全级。
+- **内容安全**:系统提示词基线 + Gemini safety settings + 输出过滤。
 - **身份披露**:bot 账号资料页标注 AI(账号设置,写入 README 强烈建议);人设由用户自定义(`persona.md`),多语言自动跟随对方。
 - 隐私边界写入 README:会话记忆默认本地、不建陌生人档案。
 
-## 8. 控制台与 AstrBot 桥
+## 8. 控制台
 
 - **M1**:CLI 控制台(状态/模式/说话代打/静音/panic/进图/配额监视)。
-- **M2**:本地 Web 控制台(FastAPI,localhost),实时字幕、画面预览、成本仪表。
-- **M3**:`astrbot_plugin_anima` 桥插件——本地 WS 连核心;IM 指令镜像控制台全集;**STT/TTS Provider 选择器**(枚举 AstrBot Provider 池,跟随或锁定,即选即生效);事件推送(有人搭话/异常/账单);路线③代理;记忆流胶水(约 100–200 行)。
+- **M2**:本地 Web 控制台(FastAPI,localhost),实时字幕、画面预览、成本仪表——远程指挥由它承担。
+- (v1.3:原 M3 `astrbot_plugin_anima` 桥插件——IM 指令镜像、Provider 选择器、事件推送、记忆胶水——随桥接路线整体取消。)
 
 ## 9. 开源交付
 
 | 项 | 决策 |
 |----|------|
-| 仓库 | 双仓库:`vrc-anima`(核心)+ `astrbot_plugin_anima`(桥,按插件市场惯例独立) |
-| 许可证 | 核心 **Apache-2.0**;桥插件 **AGPL-3.0**(与 AstrBot 生态一致) |
+| 仓库 | 单仓库 `vrc-anima`(v1.3:桥插件仓库随桥接取消) |
+| 许可证 | **Apache-2.0**(vendor 的 memstore.py 为 MIT,见 NOTICE) |
 | 署名 | AlanBacker |
 | README 必含 | ToS 姿态声明、AI 披露建议、隐私边界、账单预期表、已知限制 |
 
@@ -183,7 +186,7 @@ stateDiagram-v2
 |--------|------|----------|
 | **M1 骨架**(1–2 周) | Proton+OSC 跑通;PipeWire 双向音频;VAD→STT→`gemini-3.7-flash`(**含视觉帧**)→TTS 回合环;动作工具;CLI 控制台;半双工回声抑制 | 进私人房间:语音对话流畅;"走过来跳一下"执行正确;"我手里拿的是什么?"答得上来 |
 | **M2 感知完全体** | 门控三态状态机;Wayland/X11 双捕获;emote/转身标定;Web 控制台;OpenAI 兼容路线 | 门控模式下挂机 2 小时,账单符合预期,被搭话能自动醒 |
-| **M3 生态** | AstrBot 桥插件;记忆流;路线③;Live 备胎路线(直连);唤醒模式 | QQ 里远程指挥;昨天聊过的人今天被记得;切 Live 模式延迟 <1s |
+| **M3 进阶**(v1.3 修订) | Live 备胎路线(直连);唤醒模式;记忆进阶(global 作用域注入、跨程序共享指引) | 昨天聊过的人今天被记得;切 Live 模式延迟 <1s |
 | **M4 发布** | 双仓库、文档、配置模板、演示视频 | 陌生人按 README 30 分钟内跑起来 |
 
 ## 11. 风险清单
@@ -192,11 +195,11 @@ stateDiagram-v2
 |------|------|------|
 | ToS 灰区("自动化手段"条款) | bot 账号封禁 | 务实姿态:不改客户端、专用账号、披露 AI、限速礼貌;最坏损失一个账号 |
 | Live 模型 preview 状态、SDK 变动(google-genai 已预告 API 变更) | 备胎路线返工 | 主路线不依赖 Live;SDK 锁版本;Provider 抽象 |
-| 无说话人分离 | 认错人、被冒充指挥 | 语音=不可信层;管理指令只走桥 |
+| 无说话人分离 | 认错人、被冒充指挥 | 语音=不可信层;管理指令只走本地控制台 |
 | 嘈杂混音下 STT 误转写(多人重叠、世界 BGM) | 听错、答非所问 | VAD 切句;系统提示词声明"转写可能含错,请容错";重要场景可开原生音频开关 |
 | Proton 非官方支持 | 客户端更新偶发故障 | 社区验证 2024 末起稳定;故障期可切 Windows 机(捕获层留接口) |
 | 1.5–3s 级联延迟 | 对话不够"抢话" | 预期管理 + Live 备胎一键切换 |
-| memory_beyond 依赖其下划线私有 API | 版本升级破裂 | vendor 零依赖的 memstore.py;插件作者即本人 |
+| memory_beyond 上游协议演进 | 文件格式分叉、失去互通 | vendor 零依赖的 memstore.py;上游作者即本人 |
 | Gemini API 大陆不可用 | 主模型断供 | New API 网关聚合 + OpenAI 兼容路线 + 国产实时方言适配位 |
 | 成本失控 | 账单爆炸 | 模式档位 + 思考心跳频率 + 控制台配额监视 + 每日额度熔断(配置) |
 
@@ -219,7 +222,7 @@ stateDiagram-v2
 |---|------|------|
 | Q1 | bot 类型 | 世界内多模态 AI 智能体 |
 | Q2 | 受众 | 个人项目,开源,高质量 |
-| Q3 | 目标形态 | 语音/后台/自主三源驱动,接 AstrBot 生态 |
+| Q3 | 目标形态 | 语音/后台/自主三源驱动 ~~,接 AstrBot 生态~~(v1.3 取消) |
 | Q4 | 合规姿态 | 务实:官方客户端 + OSC + 屏幕观察,不碰无头/改客户端 |
 | Q5 | 平台 | 跨平台方案,本地运行,Python |
 | Q6 | 账号 | 已有足够等级的 bot 账号 |
@@ -229,11 +232,11 @@ stateDiagram-v2
 | Q10 | 动作抽象 | v1 离散原语,接口为连续意图预留 |
 | Q11 | 自主边界 | 用户配置开关(默认保守) |
 | Q12 | 权限 | 语音不可信;管理走桥控制台;三级急停 |
-| Q13 | 记忆 | memory_beyond 文件协议,vendor 核心 + 桥胶水 |
-| Q14 | AstrBot 形态 | Bridge:独立核心 + 薄桥插件 |
+| Q13 | 记忆 | memory_beyond 文件协议,vendor 核心 ~~+ 桥胶水~~(v1.3:同目录同 key 即共享,免桥) |
+| Q14 | AstrBot 形态 | ~~Bridge:独立核心 + 薄桥插件~~ → **v1.3:完全独立,无桥** |
 | Q15 | 模型接入 | New API 网关优先,多路线可插拔;**级联多模态为主,Live 为备** |
-| Q16 | 命名 | **Anima**(`vrc-anima` / `astrbot_plugin_anima`),署名 AlanBacker |
+| Q16 | 命名 | **Anima**(`vrc-anima`;v1.3 去掉桥插件仓库),署名 AlanBacker |
 | Q17 | 仓库/许可证 | 双仓库;Apache-2.0 + AGPL-3.0 |
 | Q18 | 说话机制 | 说话即输出,非工具;工具=动作+记忆 |
-| Q19 | 里程碑 | M1 级联骨架(含视觉)→ M2 感知 → M3 生态+Live → M4 发布 |
-| Q20 | 语音输入通路 | **STT 转写为默认**;桥接时 STT 模型由用户在 AstrBot 里选(默认跟随其当前启用项,可锁定指定项);独立默认本地 SenseVoice-small;原生音频降为可选增强开关 |
+| Q19 | 里程碑 | M1 级联骨架(含视觉)→ M2 感知 → M3 进阶(Live/唤醒/记忆)→ M4 发布 |
+| Q20 | 语音输入通路 | **STT 转写为默认**;模型选择权在用户——本地 SenseVoice-small(默认)或任意 OpenAI 兼容端点(v1.3:AstrBot 选择器随桥接取消);原生音频降为可选增强开关 |

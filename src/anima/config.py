@@ -62,7 +62,7 @@ class VadConfig:
 
 @dataclass
 class SttConfig:
-    provider: str = "sensevoice"  # sensevoice | openai | astrbot(M3 桥接)
+    provider: str = "sensevoice"  # sensevoice | openai
     base_url: str = ""            # openai 兼容端点,如 https://newapi.example.com/v1
     api_key: str = ""             # 空则读环境变量 ANIMA_STT_API_KEY
     model: str = "whisper-1"
@@ -106,7 +106,7 @@ class BrainConfig:
 
 @dataclass
 class TtsConfig:
-    provider: str = "edge"       # edge(M1);AstrBot TTS 走桥(M3)
+    provider: str = "edge"       # edge(目前唯一实现;provider 位可插拔)
     voice: str = "zh-CN-XiaoyiNeural"
     rate: str = "+0%"            # edge-tts 语速,如 +10%
 
@@ -157,7 +157,7 @@ class EmoteDef:
 @dataclass
 class MemoryConfig:
     enabled: bool = True
-    session_key: str = "vrchat:main"  # 与 AstrBot 打通时选同一个键即可跨源共享
+    session_key: str = "vrchat:main"  # 兼容程序指向同一数据目录+同键即共享记忆
 
 
 @dataclass
@@ -309,9 +309,9 @@ def _validate(cfg: AnimaConfig) -> None:
 
     if cfg.vad.backend not in ("silero", "energy"):
         raise ConfigError(f"配置 [vad].backend 应为 silero 或 energy,得到 {cfg.vad.backend!r}")
-    if cfg.stt.provider not in ("sensevoice", "openai", "astrbot"):
+    if cfg.stt.provider not in ("sensevoice", "openai"):
         raise ConfigError(
-            f"配置 [stt].provider 应为 sensevoice、openai 或 astrbot,得到 {cfg.stt.provider!r}"
+            f"配置 [stt].provider 应为 sensevoice 或 openai,得到 {cfg.stt.provider!r}"
         )
     if cfg.screen.backend not in ("x11", "none"):
         raise ConfigError(

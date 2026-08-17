@@ -1,8 +1,8 @@
 """记忆服务:把 memstore 包装成 Anima 的三个记忆工具 + 索引注入。
 
-作用域选择(DESIGN.md Q15):用共享的 session 作用域,session_key 默认
-"vrchat:main"。M3 与 AstrBot 桥接后,插件侧用同一个 key 就能读写同一
-份记忆——VRChat 里认识的人,QQ 上也记得。
+作用域选择:用共享的 session 作用域,session_key 默认 "vrchat:main"。
+memstore 是纯文件协议——任何 memory_beyond 兼容程序指向同一数据目录、
+同一 key,读写的就是同一份记忆(跨程序共享不需要任何桥)。
 """
 
 from __future__ import annotations

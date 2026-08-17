@@ -30,7 +30,7 @@ max_utterance_s = 30.0
 pre_roll_ms = 300
 
 [stt]
-# Q20:桥接 AstrBot 后 STT 模型在 AstrBot 里选(M3);独立运行用这里的配置
+# Q20:转写模型选择权在用户——本地 SenseVoice,或任意 OpenAI 兼容端点
 provider = "sensevoice"   # sensevoice(本地,pip install "vrc-anima[stt-local]")| openai(兼容端点)
 base_url = ""             # provider=openai 时的端点,如 https://your-newapi.example.com/v1
 api_key = ""              # 空则读环境变量 ANIMA_STT_API_KEY
@@ -56,7 +56,7 @@ base_url = ""             # 走 New API 网关时填网关地址(原生 /v1beta 
 temperature = -1.0        # <0 用服务端默认
 
 [tts]
-provider = "edge"         # edge-tts,免费;桥接后可换 AstrBot 的 TTS Provider(M3)
+provider = "edge"         # edge-tts,免费(目前唯一实现;provider 位可插拔)
 voice = "zh-CN-XiaoyiNeural"
 rate = "+0%"
 
@@ -87,7 +87,7 @@ output_per_mtok = 3.75
 
 [memory]
 enabled = true
-session_key = "vrchat:main"  # 桥接 AstrBot 时与 IM 会话选同一个键即可共享记忆
+session_key = "vrchat:main"  # 其他 memory_beyond 兼容程序指向同一数据目录+同键,即共享这份记忆
 
 # Emote 映射:依所选 Avatar 的参数表配置(参数名在 Avatar 的 OSC json 里)
 # [emotes]

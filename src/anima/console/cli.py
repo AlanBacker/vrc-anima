@@ -1,7 +1,7 @@
 """CLI 控制台(DESIGN.md Q14):管理动作只留给人,不暴露给模型。
 
-命令走 stdin、结果打 stdout(log 走 stderr,互不搅和)。M3 的桥接
-控制台(AstrBot 私聊管理)复用 app 上同一组方法,这里只是最薄的壳。
+命令走 stdin、结果打 stdout(log 走 stderr,互不搅和)。未来的 Web
+控制台(M2)复用 app 上同一组方法,这里只是最薄的壳。
 """
 
 from __future__ import annotations
