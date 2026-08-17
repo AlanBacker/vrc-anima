@@ -34,14 +34,23 @@ ScreenGrabber            MicCapture ── VAD(silero/energy)── 断句
 
 系统要求:Linux(X11 会话用于截屏),Python ≥ 3.11,`ffmpeg`(TTS 解码),PipeWire(虚拟声卡)。
 
+**方式一:uv(推荐)**
+
 ```bash
-sudo apt install ffmpeg          # TTS 播放依赖
+sudo apt install ffmpeg                  # TTS 播放依赖
+uv sync --extra stt-local --extra dev    # 建 .venv 装依赖;extra 按需增减
+uv run anima                             # 启动
+uv run pytest -q                         # 跑测试
+```
+
+仓库自带 `.python-version`(3.12):`stt-local` 里的 funasr/torch 对最新版 Python 轮子支持不全,uv 会自动下载并使用 3.12,无需系统安装。注意 `uv sync` 是精确同步,每次要带全所需的 `--extra`,否则会卸掉上次的可选依赖。
+
+**方式二:venv + pip**
+
+```bash
+sudo apt install ffmpeg
 python3 -m venv .venv
-.venv/bin/pip install -e .
-# 可选:本地 STT(SenseVoice-small,中文效果好,无需联网)
-.venv/bin/pip install -e ".[stt-local]"
-# 开发:测试依赖
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install -e ".[stt-local,dev]"   # extra 按需增减
 ```
 
 ### 虚拟声卡(PipeWire)
@@ -88,8 +97,8 @@ export GEMINI_API_KEY=...             # 或 config.toml [brain.gemini] api_key
 ## 运行
 
 ```bash
-.venv/bin/anima                # 读当前目录 config.toml
-.venv/bin/anima --config /path/to/config.toml --log-level DEBUG
+uv run anima                   # 读当前目录 config.toml(pip 装的用 .venv/bin/anima)
+uv run anima --config /path/to/config.toml --log-level DEBUG
 ```
 
 启动后进入控制台(stdin):
@@ -115,7 +124,7 @@ export GEMINI_API_KEY=...             # 或 config.toml [brain.gemini] api_key
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest tests/ -q
+uv run pytest -q               # pip 装的用 .venv/bin/python -m pytest tests/ -q
 ```
 
 纯逻辑模块(断句、历史帧策略、执行器抢占、聊天框限速、记忆库、状态机、成本计)全部离线可测,不需要 VRChat 或 API key。实机验证按 [DESIGN.md](DESIGN.md) §12 的清单逐项做。
