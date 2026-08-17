@@ -35,7 +35,7 @@ class MicCapture:
         self,
         device: str | None = None,
         sample_rate: int = 16000,
-        queue_max: int = 512,
+        queue_max: int = 1024,  # ≈33 秒缓冲:回合处理期间听到的话排队,溢出才丢帧
         parec: str = "parec",
         gain: float = 1.0,
     ):
