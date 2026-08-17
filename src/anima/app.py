@@ -158,7 +158,14 @@ class Anima:
             self.capture.start()
             self._capture_ok = True
         except Exception as e:
-            log.warning("麦克风不可用(%s):听觉关闭,仅控制台可用(say/state)", e)
+            hint = (
+                ";Linux 缺系统库,装一下:sudo apt install libportaudio2"
+                if "PortAudio" in str(e)
+                else ""
+            )
+            log.warning(
+                "麦克风不可用(%s%s):听觉关闭,仅控制台可用(say/state)", e, hint
+            )
 
         if self.tts is None:
             log.info("TTS 关闭([tts].provider=%r):说话只走聊天框字幕", cfg.tts.provider)

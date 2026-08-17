@@ -49,7 +49,12 @@ class AudioPlayer:
         try:
             import sounddevice as sd
         except Exception as e:
-            self._mark_unavailable(f"sounddevice 不可用:{e}")
+            hint = (
+                "(Linux 缺系统库:sudo apt install libportaudio2)"
+                if "PortAudio" in str(e)
+                else ""
+            )
+            self._mark_unavailable(f"sounddevice 不可用:{e}{hint}")
             return False
 
         self._stop_flag = False

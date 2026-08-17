@@ -25,9 +25,12 @@ FRAME_SAMPLES = 512
 SAMPLE_RATE = 16000
 FRAME_MS = FRAME_SAMPLES * 1000 // SAMPLE_RATE  # 32ms
 
-SILERO_URL = (
+SILERO_URLS = (
     "https://raw.githubusercontent.com/snakers4/silero-vad/"
-    "master/src/silero_vad/data/silero_vad.onnx"
+    "master/src/silero_vad/data/silero_vad.onnx",
+    # GitHub raw 被限流(429)时的 CDN 镜像
+    "https://cdn.jsdelivr.net/gh/snakers4/silero-vad@master/"
+    "src/silero_vad/data/silero_vad.onnx",
 )
 
 
@@ -84,20 +87,30 @@ class SileroVad:
 
 
 async def ensure_silero_model(path: Path) -> Path:
-    """模型不存在时从 silero-vad 官方仓库下载(约 2MB)。"""
+    """模型不存在时下载(约 2MB);官方 raw 被限流时依次换镜像源。"""
     if path.exists() and path.stat().st_size > 100_000:
         return path
     import httpx
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    log.info("下载 silero-vad 模型 → %s", path)
+    last_err: Exception | None = None
     async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
-        resp = await client.get(SILERO_URL)
-        resp.raise_for_status()
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(resp.content)
-        tmp.replace(path)
-    return path
+        for url in SILERO_URLS:
+            log.info("下载 silero-vad 模型 → %s(源:%s)", path, url.split("/")[2])
+            try:
+                resp = await client.get(url)
+                resp.raise_for_status()
+            except Exception as e:
+                last_err = e
+                continue
+            tmp = path.with_suffix(".tmp")
+            tmp.write_bytes(resp.content)
+            tmp.replace(path)
+            return path
+    raise RuntimeError(
+        f"所有下载源都失败(最后错误:{last_err});"
+        f"可手动下载:wget -O {path} {SILERO_URLS[0]}"
+    )
 
 
 async def build_vad(backend: str, data_dir: Path) -> Vad:

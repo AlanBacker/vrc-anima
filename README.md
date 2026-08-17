@@ -32,12 +32,12 @@ ScreenGrabber            MicCapture ── VAD(silero/energy)── 断句
 
 ## 安装
 
-系统要求:Linux(X11 会话用于截屏),Python ≥ 3.11,`ffmpeg`(TTS 解码),PipeWire(虚拟声卡)。
+系统要求:Linux(X11 会话用于截屏),Python ≥ 3.11,`ffmpeg`(TTS 解码),`libportaudio2`(声卡访问,sounddevice 的 Linux 轮子不自带),PipeWire(虚拟声卡)。
 
 **方式一:uv(推荐)**
 
 ```bash
-sudo apt install ffmpeg                  # TTS 播放依赖
+sudo apt install ffmpeg libportaudio2    # 系统依赖:TTS 解码 + 声卡访问
 uv sync --extra stt-local --extra dev    # 建 .venv 装依赖;extra 按需增减
 uv run anima                             # 启动
 uv run pytest -q                         # 跑测试
@@ -48,7 +48,7 @@ uv run pytest -q                         # 跑测试
 **方式二:venv + pip**
 
 ```bash
-sudo apt install ffmpeg
+sudo apt install ffmpeg libportaudio2
 python3 -m venv .venv
 .venv/bin/pip install -e ".[stt-local,dev]"   # extra 按需增减
 ```
@@ -64,7 +64,15 @@ pactl load-module module-null-sink sink_name=anima_ears sink_properties=device.d
 pactl load-module module-null-sink sink_name=anima_mouth sink_properties=device.description=AnimaMouth
 ```
 
-然后在 `pavucontrol` 里把 VRChat 的输出指到 `AnimaEars`,VRChat 的输入(录音)指到 `AnimaMouth` 的 monitor;`config.toml` 里 `[audio]` 的 `input_device` 填 `AnimaEars` 的 monitor,`output_device` 填 `AnimaMouth`。
+游戏那半边:在 `pavucontrol` 里把 VRChat 的**输出**指到 `AnimaEars`,VRChat 的**输入(录音)**指到 `AnimaMouth` 的 monitor。
+
+Anima 这半边:PortAudio 在 Linux 上通常只看得到 `pulse`/`default` 设备,看不到具体虚拟声卡节点,所以**用环境变量定向**(推荐,`[audio]` 的 `input_device`/`output_device` 留空即可):
+
+```bash
+PULSE_SOURCE=anima_ears.monitor PULSE_SINK=anima_mouth uv run anima
+```
+
+想看 PortAudio 实际枚举出的设备表:`uv run python -m sounddevice`。
 
 ### VRChat 侧设置
 
