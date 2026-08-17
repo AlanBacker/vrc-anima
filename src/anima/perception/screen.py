@@ -28,10 +28,11 @@ class ScreenGrabber:
         self._monitor = monitor
         self._quality = jpeg_quality
         self._warned = False
+        self._fails = 0  # 连续失败计数;满 3 次本次运行停用(Xlib 会绕过日志直刷 stderr)
 
     def grab_jpeg(self, max_px: int = 768) -> bytes | None:
         """同步抓一帧;异步代码请用 agrab_jpeg。"""
-        if self._backend == "none":
+        if self._backend == "none" or self._fails >= 3:
             return None
         try:
             import mss
@@ -52,11 +53,18 @@ class ScreenGrabber:
                 )
             buf = io.BytesIO()
             img.save(buf, "JPEG", quality=self._quality)
+            self._fails = 0
             return buf.getvalue()
         except Exception as e:
+            self._fails += 1
             if not self._warned:
                 self._warned = True
                 log.warning("抓屏失败(%s),回合将不带画面帧(仅提示一次)", e)
+            elif self._fails == 3:
+                log.warning(
+                    "抓屏连续失败 3 次,本次运行停用抓屏;"
+                    "修好 DISPLAY/XAUTHORITY 后重启生效"
+                )
             else:
                 log.debug("抓屏失败:%s", e)
             return None

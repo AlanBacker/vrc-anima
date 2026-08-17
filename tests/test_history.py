@@ -83,3 +83,38 @@ def test_empty_assistant_turn_skipped():
     h.add(UserTurn(text="……"))
     h.add(AssistantTurn(text="", tool_calls=[]))
     assert [c["role"] for c in h.render()] == ["user"]
+
+
+def test_parallel_tool_results_merge_into_one_content():
+    """回归:N 个 functionCall 必须对应同一条内容里的 N 个 resp,
+    劈成多条会被 Gemini 400(实机双动作 move+jump 触发过)。"""
+    h = History()
+    h.add(UserTurn(text="向前走然后跳"))
+    h.add(
+        AssistantTurn(
+            tool_calls=[
+                ToolCall("move", {"direction": "forward"}, "c1"),
+                ToolCall("jump", {}, "c2"),
+            ]
+        )
+    )
+    h.add(ToolResultTurn("move", {"ok": True}, "c1"))
+    h.add(ToolResultTurn("jump", {"ok": True}, "c2", frame_jpeg=b"jpg"))
+    contents = h.render()
+    tool_contents = [c for c in contents if c["role"] == "tool"]
+    assert len(tool_contents) == 1
+    resps = [p["resp"] for p in tool_contents[0]["parts"]]
+    assert [r["id"] for r in resps] == ["c1", "c2"]  # 顺序与 call 一致
+    # 快照帧仍是独立的 user 内容,跟在合并后的 tool 内容之后
+    assert contents[-1]["role"] == "user"
+    assert contents[-1]["parts"][-1] == {"jpeg": b"jpg"}
+
+
+def test_single_tool_result_shape_unchanged():
+    h = History()
+    h.add(UserTurn(text="跳"))
+    h.add(AssistantTurn(tool_calls=[ToolCall("jump", {}, "c1")]))
+    h.add(ToolResultTurn("jump", {"ok": True}, "c1"))
+    contents = h.render()
+    assert contents[-1]["role"] == "tool"
+    assert len(contents[-1]["parts"]) == 1

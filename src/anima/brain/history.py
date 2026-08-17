@@ -55,8 +55,20 @@ class History:
 
     def render(self, memory_index: str = "") -> list[dict]:
         contents: list[dict] = []
-        for turn in self._turns:
-            contents.extend(self._render_turn(turn))
+        turns = self._turns
+        i = 0
+        while i < len(turns):
+            if isinstance(turns[i], ToolResultTurn):
+                # 连续的工具结果并成一组:Gemini 要求 functionResponse
+                # 部件数与上一条 functionCall 数严格相等,劈开就 400
+                j = i
+                while j + 1 < len(turns) and isinstance(turns[j + 1], ToolResultTurn):
+                    j += 1
+                contents.extend(self._render_tool_results(turns[i : j + 1]))
+                i = j + 1
+            else:
+                contents.extend(self._render_turn(turns[i]))
+                i += 1
         self._apply_frame_policy(contents)
         if memory_index and contents:
             contents[-1]["parts"].append(
@@ -91,34 +103,35 @@ class History:
             return [{"role": "model", "parts": parts}]
 
         if isinstance(turn, ToolResultTurn):
-            out: list[dict] = [
-                {
-                    "role": "tool",
-                    "parts": [
-                        {
-                            "resp": {
-                                "name": turn.name,
-                                "result": turn.result,
-                                "id": turn.call_id,
-                            }
-                        }
-                    ],
-                }
-            ]
-            if turn.frame_jpeg is not None:
+            return History._render_tool_results([turn])
+
+        raise TypeError(f"未知回合类型:{type(turn)!r}")
+
+    @staticmethod
+    def _render_tool_results(turns: list[ToolResultTurn]) -> list[dict]:
+        """同一模型回合的全部工具结果 → 一条 tool 内容(N 个 resp 部件)。"""
+        out: list[dict] = [
+            {
+                "role": "tool",
+                "parts": [
+                    {"resp": {"name": t.name, "result": t.result, "id": t.call_id}}
+                    for t in turns
+                ],
+            }
+        ]
+        for t in turns:
+            if t.frame_jpeg is not None:
                 # 高清帧不能塞进 functionResponse,单独補一条 user 内容
                 out.append(
                     {
                         "role": "user",
                         "parts": [
-                            {"text": f"[{turn.name} 拍到的画面]"},
-                            {"jpeg": turn.frame_jpeg},
+                            {"text": f"[{t.name} 拍到的画面]"},
+                            {"jpeg": t.frame_jpeg},
                         ],
                     }
                 )
-            return out
-
-        raise TypeError(f"未知回合类型:{type(turn)!r}")
+        return out
 
     @staticmethod
     def _apply_frame_policy(contents: list[dict]) -> None:
