@@ -216,15 +216,19 @@ class Anima:
 
     async def _on_utterance(self, pcm) -> None:
         seconds = len(pcm) / self.cfg.audio.sample_rate
+        log.info("捕到语音段(%.1f 秒),转写中…", seconds)
+        t0 = time.monotonic()
         try:
             result = await self.stt.transcribe(pcm)
         except Exception as e:
             log.warning("STT 转写失败:%s", e)
             return
+        stt_ms = (time.monotonic() - t0) * 1000
         text = result.text.strip()
         if not text:
+            log.info("转写为空(%.1f 秒语音,耗时 %.0fms)——噪声或听不清", seconds, stt_ms)
             return
-        log.info("听到(%.1fs):%s", seconds, text)
+        log.info("听到(%.1fs|转写 %.0fms):%s", seconds, stt_ms, text)
 
         if not self.state.should_respond(text):
             log.info("旁听不回应(%s)", self.state.describe())

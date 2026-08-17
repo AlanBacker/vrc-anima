@@ -30,7 +30,11 @@ max_utterance_s = 30.0
 pre_roll_ms = 300
 
 [stt]
-# Q20:转写模型选择权在用户——本地 SenseVoice,或任意 OpenAI 兼容端点
+# Q20:转写模型选择权在用户——本地 SenseVoice,或任意 OpenAI 兼容端点。
+# 例:经 New API 网关转发 Groq 的 whisper(快且准,还省掉本地模型下载):
+#   provider = "openai"
+#   base_url = "https://你的网关域名/v1"
+#   model = "whisper-large-v3"   # 用网关里给该渠道起的模型名
 provider = "sensevoice"   # sensevoice(本地,pip install "vrc-anima[stt-local]")| openai(兼容端点)
 base_url = ""             # provider=openai 时的端点,如 https://your-newapi.example.com/v1
 api_key = ""              # 空则读环境变量 ANIMA_STT_API_KEY
