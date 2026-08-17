@@ -53,8 +53,15 @@ class EnergyVad:
         pass
 
 
+CONTEXT_SAMPLES = 64  # v5 要求帧前拼上一帧尾部 64 样本,实际输入 576
+
+
 class SileroVad:
-    """silero-vad v5 ONNX:输入 [1,512] f32 + 状态 [2,1,128],输出语音概率。"""
+    """silero-vad v5 ONNX:输入 [1, 64+512] f32 + 状态 [2,1,128],输出语音概率。
+
+    64 样本上下文不可省:模型输入轴是动态的,裸喂 512 不报错,但概率
+    会塌到 ~0(真人语音实测 max 0.008 vs 正确姿势 max 1.0)。
+    """
 
     def __init__(self, model_path: Path):
         import onnxruntime as ort
@@ -71,18 +78,18 @@ class SileroVad:
 
     def reset(self) -> None:
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
+        self._context = np.zeros(CONTEXT_SAMPLES, dtype=np.float32)
 
     def __call__(self, frame: np.ndarray) -> float:
         if frame.shape[0] != FRAME_SAMPLES:
             raise ValueError(f"silero 需要 {FRAME_SAMPLES} 样本帧,收到 {frame.shape[0]}")
+        frame = frame.astype(np.float32, copy=False)
+        x = np.concatenate([self._context, frame])
         out, self._state = self._session.run(
             None,
-            {
-                "input": frame.reshape(1, -1).astype(np.float32),
-                "state": self._state,
-                "sr": self._sr,
-            },
+            {"input": x.reshape(1, -1), "state": self._state, "sr": self._sr},
         )
+        self._context = frame[-CONTEXT_SAMPLES:]
         return float(out[0][0])
 
 

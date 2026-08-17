@@ -2,7 +2,13 @@
 
 import numpy as np
 
-from anima.perception.vad import FRAME_MS, EnergyVad, UtteranceSegmenter
+from anima.perception.vad import (
+    CONTEXT_SAMPLES,
+    FRAME_MS,
+    EnergyVad,
+    SileroVad,
+    UtteranceSegmenter,
+)
 
 LOUD = np.full(512, 0.1, dtype=np.float32)   # rms=0.1
 QUIET = np.zeros(512, dtype=np.float32)
@@ -65,3 +71,46 @@ def test_in_speech_flag():
     assert seg.in_speech
     seg.reset()
     assert not seg.in_speech
+
+
+# ---------------------------------------------------------- silero 输入布局
+# 回归:v5 必须喂 64 上下文 + 512 帧 = 576 样本;裸 512 不报错但概率塌 0。
+# 用假 session 断言输入布局,不依赖模型文件与网络。
+
+
+class _FakeSession:
+    def __init__(self):
+        self.inputs = []
+
+    def run(self, _outputs, feeds):
+        self.inputs.append(feeds["input"].copy())
+        return [np.array([[0.9]], dtype=np.float32), feeds["state"]]
+
+
+def _bare_silero():
+    vad = object.__new__(SileroVad)
+    vad._session = _FakeSession()
+    vad._sr = np.array(16000, dtype=np.int64)
+    vad.reset()
+    return vad
+
+
+def test_silero_prepends_context_samples():
+    vad = _bare_silero()
+    a = np.arange(512, dtype=np.float32) / 512
+    assert abs(vad(a) - 0.9) < 1e-6
+    vad(-a)
+    first, second = vad._session.inputs
+    assert first.shape == (1, CONTEXT_SAMPLES + 512)
+    assert np.all(first[0, :CONTEXT_SAMPLES] == 0.0)  # 首帧:零上下文
+    # 次帧:上下文 = 上一帧尾部 64 样本
+    assert np.array_equal(second[0, :CONTEXT_SAMPLES], a[-CONTEXT_SAMPLES:])
+    assert np.array_equal(second[0, CONTEXT_SAMPLES:], -a)
+
+
+def test_silero_reset_clears_context():
+    vad = _bare_silero()
+    vad(np.ones(512, dtype=np.float32))
+    vad.reset()
+    vad(np.ones(512, dtype=np.float32))
+    assert np.all(vad._session.inputs[-1][0, :CONTEXT_SAMPLES] == 0.0)
