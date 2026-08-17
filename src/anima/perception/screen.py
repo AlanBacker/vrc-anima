@@ -29,6 +29,8 @@ class ScreenGrabber:
         self._quality = jpeg_quality
         self._warned = False
         self._fails = 0  # 连续失败计数;满 3 次本次运行停用(Xlib 会绕过日志直刷 stderr)
+        self._black_run = 0  # 连续全黑帧计数;满 3 帧提示一次(Wayland 会话的典型症状)
+        self._black_warned = False
 
     def grab_jpeg(self, max_px: int = 768) -> bytes | None:
         """同步抓一帧;异步代码请用 agrab_jpeg。"""
@@ -51,6 +53,7 @@ class ScreenGrabber:
                     (max(1, round(w * scale)), max(1, round(h * scale))),
                     Image.LANCZOS,
                 )
+            self._check_black(img)
             buf = io.BytesIO()
             img.save(buf, "JPEG", quality=self._quality)
             self._fails = 0
@@ -68,6 +71,23 @@ class ScreenGrabber:
             else:
                 log.debug("抓屏失败:%s", e)
             return None
+
+    def _check_black(self, img) -> None:
+        """连续 3 帧全黑给一次提示:抓成功但拍到黑,几乎总是 Wayland 会话。"""
+        if self._black_warned:
+            return
+        _lo, hi = img.convert("L").getextrema()
+        if hi > 5:
+            self._black_run = 0
+            return
+        self._black_run += 1
+        if self._black_run >= 3:
+            self._black_warned = True
+            log.warning(
+                "抓屏成功但连续全黑:大概率是 Wayland 会话(X11 抓屏只能拍到黑),"
+                "请在登录界面齿轮处切「Ubuntu on Xorg」;若已是 Xorg,"
+                "检查 [screen].monitor 序号(0=所有屏拼接)"
+            )
 
     async def agrab_jpeg(self, max_px: int = 768) -> bytes | None:
         return await asyncio.to_thread(self.grab_jpeg, max_px)
