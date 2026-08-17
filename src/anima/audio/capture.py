@@ -1,10 +1,14 @@
-"""麦克风采集:16kHz 单声道 float32,512 样本一帧(32ms)。
+"""麦克风采集:parec 子进程 → 16kHz 单声道 float32,512 样本一帧(32ms)。
 
 帧大小 512 特意与 silero-vad v5 的输入窗口一致——采集帧不需要重组
 就能直接喂 VAD。
 
+用 PulseAudio 原生工具 parec 而不是 PortAudio:可以按名字精确指定
+采集源(如 anima_ears.monitor),PipeWire/Pulse 负责重采样;PortAudio
+在 Linux 上通常只暴露 pulse/default 设备,定向不可靠。
+
 半双工回声抑制的第一环在这里:bot 开口说话前 gate(True),采集帧在
-回调里直接丢掉;说完并等够 echo_tail_ms 后 gate(False) 恢复。这样
+读取线程里直接丢掉;说完并等够 echo_tail_ms 后 gate(False) 恢复。这样
 自己的声音(经房间/混音回来的)不会被当成来人说话。
 """
 
@@ -12,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
+import threading
 from typing import AsyncIterator
 
 import numpy as np
@@ -22,48 +28,69 @@ FRAME_SAMPLES = 512  # 32ms @ 16kHz,= silero v5 窗口
 
 
 class MicCapture:
-    """sounddevice 输入流 → asyncio 队列。start() 需在事件循环内调用。"""
+    """parec 子进程 → asyncio 队列。start() 需在事件循环内调用。"""
 
     def __init__(
         self,
-        device: str | int | None = None,
+        device: str | None = None,
         sample_rate: int = 16000,
         queue_max: int = 512,
+        parec: str = "parec",
     ):
         self._device = device
         self.sample_rate = sample_rate
+        self._parec = parec
         self._queue: asyncio.Queue[np.ndarray] = asyncio.Queue(maxsize=queue_max)
         self._gated = False
-        self._stream = None
+        self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._stopping = False
         self._dropped = 0
-        self._status_logged = False
 
     def start(self) -> None:
-        import sounddevice as sd  # 懒加载:无声卡的环境 import 就会抱怨
-
         self._loop = asyncio.get_running_loop()
-        self._stream = sd.InputStream(
-            device=self._device,
-            channels=1,
-            samplerate=self.sample_rate,
-            dtype="float32",
-            blocksize=FRAME_SAMPLES,
-            callback=self._callback,
+        cmd = [
+            self._parec,
+            "--raw",
+            f"--rate={self.sample_rate}",
+            "--channels=1",
+            "--format=float32le",
+            "--latency-msec=50",
+            "--client-name=Anima",
+            "--stream-name=ears",
+        ]
+        if self._device:
+            cmd.append(f"--device={self._device}")
+        try:
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                "找不到 parec(PulseAudio 采集工具):sudo apt install pulseaudio-utils"
+            ) from e
+        self._stopping = False
+        self._thread = threading.Thread(
+            target=self._read_loop, name="mic-parec", daemon=True
         )
-        self._stream.start()
+        self._thread.start()
         log.info(
-            "麦克风采集已启动:device=%s rate=%d 帧=%d样本",
-            self._device if self._device is not None else "默认",
+            "麦克风采集已启动(parec):device=%s rate=%d 帧=%d样本",
+            self._device or "默认音源",
             self.sample_rate,
             FRAME_SAMPLES,
         )
 
     def stop(self) -> None:
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        self._stopping = True
+        proc = self._proc
+        self._proc = None
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
 
     # ---------------------------------------------------------- 半双工门控
 
@@ -91,18 +118,35 @@ class MicCapture:
         while True:
             yield await self._queue.get()
 
-    # ---------------------------------------------------------- 回调(音频线程)
+    # ---------------------------------------------------------- 读取线程
 
-    def _callback(self, indata, frames, time_info, status) -> None:
-        if status and not self._status_logged:
-            self._status_logged = True
-            log.warning("音频输入流状态异常(仅提示一次):%s", status)
-        if self._gated:
+    def _read_loop(self) -> None:
+        proc = self._proc
+        if proc is None or proc.stdout is None:
             return
-        frame = np.copy(indata[:, 0])
-        loop = self._loop
-        if loop is not None and not loop.is_closed():
-            loop.call_soon_threadsafe(self._put, frame)
+        frame_bytes = FRAME_SAMPLES * 4  # float32
+        while not self._stopping:
+            data = proc.stdout.read(frame_bytes)
+            if not data or len(data) < frame_bytes:
+                break
+            if self._gated:
+                continue
+            frame = np.frombuffer(data, dtype=np.float32).copy()
+            loop = self._loop
+            if loop is not None and not loop.is_closed():
+                loop.call_soon_threadsafe(self._put, frame)
+        if not self._stopping:
+            err = b""
+            try:
+                if proc.stderr is not None:
+                    err = proc.stderr.read() or b""
+            except Exception:
+                pass
+            log.warning(
+                "麦克风采集进程意外退出(device=%s):%s",
+                self._device or "默认音源",
+                err.decode(errors="replace").strip() or "未知原因",
+            )
 
     def _put(self, frame: np.ndarray) -> None:
         try:

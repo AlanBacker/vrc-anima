@@ -14,8 +14,10 @@ send_port = 9000
 recv_port = 9001
 
 [audio]
-input_device = ""         # 分接游戏混音的录音设备(pactl/pw 名称或序号;空=默认)
-output_device = ""        # 虚拟麦克风 sink(VRChat 的输入设备;空=默认)
+# 设备用 Pulse/PipeWire 名称(pactl list short sources / sinks 查看;空=系统默认)。
+# 默认值对应 README 里 pactl load-module 建的两个虚拟声卡。
+input_device = "anima_ears.monitor"   # 她的耳朵:游戏声音汇入的 sink 的 monitor
+output_device = "anima_mouth"         # 她的嘴:VRChat 麦克风所指的 sink
 sample_rate = 16000
 echo_tail_ms = 300        # 半双工:说完话后多静默一小段,吃掉残响
 
