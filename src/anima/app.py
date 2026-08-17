@@ -85,7 +85,9 @@ class Anima:
         )
         self.player = AudioPlayer(_device(cfg.audio.output_device))
         self.capture = MicCapture(
-            _device(cfg.audio.input_device), cfg.audio.sample_rate
+            _device(cfg.audio.input_device),
+            cfg.audio.sample_rate,
+            gain=cfg.audio.input_gain,
         )
         self.memory = (
             MemoryService(cfg.data_dir, cfg.memory.session_key)

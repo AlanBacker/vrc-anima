@@ -19,6 +19,7 @@ recv_port = 9001
 input_device = "anima_ears.monitor"   # 她的耳朵:游戏声音汇入的 sink 的 monitor
 output_device = "anima_mouth"         # 她的嘴:VRChat 麦克风所指的 sink
 sample_rate = 16000
+input_gain = 1.0          # 输入软件增益:游戏里人声太小(mic 电平总在 -35dB 以下)时调大,如 2.0~4.0;电平条/VAD/转写吃的都是增益后的信号
 echo_tail_ms = 300        # 半双工:说完话后多静默一小段,吃掉残响
 
 [vad]

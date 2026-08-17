@@ -37,10 +37,12 @@ class MicCapture:
         sample_rate: int = 16000,
         queue_max: int = 512,
         parec: str = "parec",
+        gain: float = 1.0,
     ):
         self._device = device
         self.sample_rate = sample_rate
         self._parec = parec
+        self._gain = gain
         self._queue: asyncio.Queue[np.ndarray] = asyncio.Queue(maxsize=queue_max)
         self._gated = False
         self._proc: subprocess.Popen | None = None
@@ -87,6 +89,8 @@ class MicCapture:
             self.sample_rate,
             FRAME_SAMPLES,
         )
+        if self._gain != 1.0:
+            log.info("输入软件增益:×%.1f([audio].input_gain)", self._gain)
 
     def stop(self) -> None:
         self._stopping = True
@@ -136,6 +140,9 @@ class MicCapture:
             if not data or len(data) < frame_bytes:
                 break
             frame = np.frombuffer(data, dtype=np.float32)
+            if self._gain != 1.0:
+                # 增益在统计之前施加:电平条/VAD/转写看到的都是同一份信号
+                frame = np.clip(frame * self._gain, -1.0, 1.0)
             self.frames_total += 1
             rms = float(np.sqrt(np.mean(frame * frame)))
             self.level_now = rms

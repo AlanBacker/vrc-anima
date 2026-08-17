@@ -82,3 +82,14 @@ def test_bad_provider(tmp_path):
     p.write_text('[stt]\nprovider = "whisperx"\n', encoding="utf-8")
     with pytest.raises(ConfigError, match="provider"):
         load(p)
+
+
+def test_input_gain_default_and_range(tmp_path):
+    assert load(None).audio.input_gain == 1.0
+    p = tmp_path / "c.toml"
+    p.write_text("[audio]\ninput_gain = 2.5\n", encoding="utf-8")
+    assert load(p).audio.input_gain == 2.5
+    for bad in ("0", "-1.0", "17"):
+        p.write_text(f"[audio]\ninput_gain = {bad}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match="input_gain"):
+            load(p)

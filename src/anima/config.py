@@ -47,6 +47,7 @@ class AudioConfig:
     input_device: str = ""       # 游戏混音分接源(名称或序号,空=系统默认)
     output_device: str = ""      # 虚拟麦克风 sink(名称或序号,空=系统默认)
     sample_rate: int = 16000
+    input_gain: float = 1.0      # 输入软件增益(游戏声太小时调大,如 2.0;VAD/STT 都吃增益后的)
     echo_tail_ms: int = 300      # 半双工:说完话后额外静默的尾巴
 
 
@@ -307,6 +308,10 @@ def _validate(cfg: AnimaConfig) -> None:
         )
     cfg.state.mode = mode
 
+    if not 0 < cfg.audio.input_gain <= 16:
+        raise ConfigError(
+            f"配置 [audio].input_gain 应在 0–16 之间(1.0=不放大),得到 {cfg.audio.input_gain!r}"
+        )
     if cfg.vad.backend not in ("silero", "energy"):
         raise ConfigError(f"配置 [vad].backend 应为 silero 或 energy,得到 {cfg.vad.backend!r}")
     if cfg.stt.provider not in ("sensevoice", "openai"):
