@@ -22,8 +22,10 @@ def build_tool_decls(
         {
             "name": "move",
             "description": (
-                "朝一个方向移动若干秒(异步执行,立即返回;新的 move 会打断旧的)。"
-                "在陌生环境请小步移动(1~2 秒)再看画面。"
+                "朝一个方向平移若干秒(left/right 是横着挪,不是转身;转身用 turn)。"
+                "异步执行:返回『已开始』不代表已到达,走完想确认位置就再 snapshot。"
+                "新的 move 会打断进行中的 move。陌生环境小步走(1~2 秒)看一眼再继续,"
+                "免得撞墙或掉下去。"
             ),
             "parameters": {
                 "type": "OBJECT",
@@ -43,20 +45,32 @@ def build_tool_decls(
         },
         {
             "name": "turn",
-            "description": "原地转身。正数向右转,负数向左转,单位是角度(如 90=右转四分之一圈)。",
+            "description": (
+                "原地转身,单位角度:正=右转(顺时针),负=左转;"
+                "90=右转四分之一圈,180=转身向后,±720 以内。按标定速度换算成"
+                "按轴时长,异步执行;转完想核对朝向就 snapshot。"
+            ),
             "parameters": {
                 "type": "OBJECT",
-                "properties": {"degrees": {"type": "NUMBER"}},
+                "properties": {
+                    "degrees": {
+                        "type": "NUMBER",
+                        "description": "转多少度:正右负左,±720 以内",
+                    }
+                },
                 "required": ["degrees"],
             },
         },
         {
             "name": "jump",
-            "description": "跳一下。",
+            "description": "原地跳一下。可以用来表达情绪(开心蹦一下)或引起注意。",
         },
         {
             "name": "set_run",
-            "description": "切换奔跑/步行。on=true 之后的移动是跑步,false 恢复步行。",
+            "description": (
+                "切换移动速度档:on=true 后续 move 都是跑步,on=false 恢复走路。"
+                "这是持续状态,记得跑完调回来,贴着人跑来跑去很吓人。"
+            ),
             "parameters": {
                 "type": "OBJECT",
                 "properties": {"on": {"type": "BOOLEAN"}},
@@ -65,15 +79,26 @@ def build_tool_decls(
         },
         {
             "name": "snapshot",
-            "description": "拍一张当前视野的高清照片,马上回传给你看。想看清楚眼前的东西时用。",
+            "description": (
+                "拍一张你当前第一人称视野的高清照片。照片会在本轮工具结果后"
+                "回传给你,下一轮你就能描述看到的东西——想看清眼前的人、文字、"
+                "环境细节,或移动/转身后确认新位置时用。"
+            ),
         },
         {
             "name": "stop_all",
-            "description": "立刻停止所有正在进行的移动和转身。",
+            "description": (
+                "立刻停止一切进行中的移动和转身(急刹)。用户喊『停』『别动』,"
+                "或你发现快撞上东西/走出预期路线时马上调用。"
+            ),
         },
         {
             "name": "memory_search",
-            "description": "在长期记忆里按关键词搜索,返回命中的文件与片段。",
+            "description": (
+                "在长期记忆里全文搜索,返回命中的文件路径和上下文片段。"
+                "多个关键词用空格隔开。别人提到你似曾相识的人名、地点、约定时,"
+                "先搜再回答,别硬编。"
+            ),
             "parameters": {
                 "type": "OBJECT",
                 "properties": {"query": {"type": "STRING"}},
@@ -82,7 +107,10 @@ def build_tool_decls(
         },
         {
             "name": "memory_read",
-            "description": "读取一条长期记忆的全文。path 用 [记忆索引] 里列出的相对路径。",
+            "description": (
+                "读取一条长期记忆的完整内容。path 用 [记忆索引] 或 memory_search "
+                "结果里给出的相对路径。索引里的一句话摘要不够用时再读全文。"
+            ),
             "parameters": {
                 "type": "OBJECT",
                 "properties": {"path": {"type": "STRING"}},
@@ -92,9 +120,11 @@ def build_tool_decls(
         {
             "name": "memory_write",
             "description": (
-                "写入/更新一条长期记忆(遇到值得记住的人和事就用)。"
-                "内容用 markdown,开头带 frontmatter,其中 description 是一句话摘要,"
-                "会出现在 [记忆索引] 里。"
+                "写入长期记忆;path 已存在则整体覆盖(更新前建议先 memory_read 旧文,"
+                "把还有效的内容合并进新版)。值得记:人的名字/长相/喜好、约定、"
+                "重要事件、去过的世界;不值得:寒暄和闲聊流水账。内容用 markdown,"
+                "开头必须是 frontmatter:---、description: 一句话摘要(会展示在"
+                " [记忆索引] 里,搜索也靠它)、---,然后是正文。"
             ),
             "parameters": {
                 "type": "OBJECT",
@@ -118,10 +148,19 @@ def build_tool_decls(
             2,
             {
                 "name": "look_pitch",
-                "description": "抬头/低头(实验性,部分情况可能无效)。正数抬头,负数低头,单位角度。",
+                "description": (
+                    "视线抬头/低头,单位角度:正=抬头看上方,负=低头看下方,"
+                    "±90 以内。实验性:部分世界/相机模式下不生效——调用后画面"
+                    "没变化就别反复重试,口头说明看不了就好。"
+                ),
                 "parameters": {
                     "type": "OBJECT",
-                    "properties": {"degrees": {"type": "NUMBER"}},
+                    "properties": {
+                        "degrees": {
+                            "type": "NUMBER",
+                            "description": "抬/低多少度:正上负下,±90 以内",
+                        }
+                    },
                     "required": ["degrees"],
                 },
             },
@@ -132,7 +171,10 @@ def build_tool_decls(
             2,
             {
                 "name": "emote",
-                "description": "播放一个动作表情。",
+                "description": (
+                    "播放一个 Avatar 动作表情(挥手、跳舞等,可选名单见 enum)。"
+                    "部分表情会持续几秒,期间照常可以说话。"
+                ),
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {

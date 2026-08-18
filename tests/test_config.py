@@ -93,3 +93,13 @@ def test_input_gain_default_and_range(tmp_path):
         p.write_text(f"[audio]\ninput_gain = {bad}\n", encoding="utf-8")
         with pytest.raises(ConfigError, match="input_gain"):
             load(p)
+
+
+def test_thinking_level_default_and_whitelist(tmp_path):
+    assert load(None).brain.gemini.thinking_level == ""
+    p = tmp_path / "c.toml"
+    p.write_text('[brain.gemini]\nthinking_level = "low"\n', encoding="utf-8")
+    assert load(p).brain.gemini.thinking_level == "low"
+    p.write_text('[brain.gemini]\nthinking_level = "ultra"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="thinking_level"):
+        load(p)

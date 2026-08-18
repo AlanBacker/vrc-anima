@@ -59,6 +59,7 @@ model = "gemini-3.7-flash"
 api_key = ""              # 空则读 GEMINI_API_KEY / GOOGLE_API_KEY
 base_url = ""             # 走 New API 网关时填网关地址(原生 /v1beta 透传);空=直连
 temperature = -1.0        # <0 用服务端默认
+thinking_level = ""       # 思考等级:minimal | low | medium | high;空=服务端默认(陪聊建议 low,响应快还省钱)
 
 [tts]
 provider = "edge"         # edge-tts,免费(目前唯一实现;provider 位可插拔)

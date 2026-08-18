@@ -120,6 +120,11 @@ class GeminiBrain:
             ]
         if g.temperature >= 0:
             config_kwargs["temperature"] = g.temperature
+        if g.thinking_level:
+            # 陪聊 bot 通常 minimal/low 就够,还省首字延迟;留空走服务端默认
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_level=g.thinking_level.upper()
+            )
 
         response = await client.aio.models.generate_content(
             model=g.model,

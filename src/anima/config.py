@@ -87,6 +87,7 @@ class GeminiConfig:
     api_key: str = ""            # 空则读 GEMINI_API_KEY / GOOGLE_API_KEY
     base_url: str = ""           # New API 网关地址(走 /v1beta 原生透传);空=直连 Google
     temperature: float = -1.0    # <0 表示用服务端默认
+    thinking_level: str = ""     # 思考等级:minimal|low|medium|high;空=服务端默认
 
     def resolved_api_key(self) -> str:
         return (
@@ -308,6 +309,11 @@ def _validate(cfg: AnimaConfig) -> None:
         )
     cfg.state.mode = mode
 
+    if cfg.brain.gemini.thinking_level not in ("", "minimal", "low", "medium", "high"):
+        raise ConfigError(
+            "配置 [brain.gemini].thinking_level 应为 minimal/low/medium/high 或留空,"
+            f"得到 {cfg.brain.gemini.thinking_level!r}"
+        )
     if not 0 < cfg.audio.input_gain <= 16:
         raise ConfigError(
             f"配置 [audio].input_gain 应在 0–16 之间(1.0=不放大),得到 {cfg.audio.input_gain!r}"

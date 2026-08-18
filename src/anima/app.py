@@ -293,7 +293,6 @@ class Anima:
         )
         self.history.add(AssistantTurn(text=text, tool_calls=reply.tool_calls))
 
-        snapshot_taken = False
         for call in reply.tool_calls:
             result = await self._run_tool(call)
             frame_hi = None
@@ -301,8 +300,6 @@ class Anima:
                 frame_hi = await self.screen.agrab_jpeg(SNAPSHOT_PX)
                 if frame_hi is None:
                     result = {"status": "error", "detail": "抓屏失败,拍不了照片"}
-                else:
-                    snapshot_taken = True
             log.info(
                 "动作 %s%s → %s",
                 call.name,
@@ -318,11 +315,13 @@ class Anima:
                 )
             )
 
-        # 说话与 snapshot 追问并行:追问回合的说话会在锁上自然排队
+        # 动过工具就再给一轮追问:让她对结果有下文(拍了照说看到啥、
+        # 走完路搭句话,或继续沉默)。说话与追问并行,追问回合的说话在
+        # 锁上自然排队;depth 封顶防"工具→追问→工具"打转。
         speak_task = (
             asyncio.create_task(self.speech.speak(text)) if text else None
         )
-        if snapshot_taken and depth < 1:
+        if reply.tool_calls and depth < 2:
             await self._brain_cycle(depth + 1)
         if speak_task is not None:
             await speak_task
