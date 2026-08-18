@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import math
 import time
@@ -25,6 +26,12 @@ from .action.tools import MEMORY_TOOLS, build_tool_decls
 from .audio.capture import MicCapture
 from .audio.playback import AudioPlayer
 from .brain.base import AssistantTurn, ToolCall, ToolResultTurn, UserTurn
+from .brain.compress import (
+    build_summary_prompt,
+    parse_summary_response,
+    render_memory_file,
+    render_transcript,
+)
 from .brain.gemini import GeminiBrain
 from .brain.history import History
 from .brain.prompt import build_system_prompt
@@ -104,6 +111,8 @@ class Anima:
             cfg.costs.input_per_mtok, cfg.costs.output_per_mtok, cfg.limits.daily_usd
         )
         self.history = History(cfg.brain.max_history_turns)
+        self._summarizer: GeminiBrain | None = None  # 压缩用,首次触发时建
+        self._last_prompt_tokens = 0
         self.executor = ActionExecutor(self.motor, cfg.calibration, cfg.emotes)
         self.speech = SpeechPipeline(
             self.motor,
@@ -265,6 +274,7 @@ class Anima:
             )
         )
         await self._brain_cycle(depth=0)
+        await self._maybe_compress()
 
     async def _brain_cycle(self, depth: int) -> None:
         memory_index = await self.memory.index_text() if self.memory else ""
@@ -280,6 +290,7 @@ class Anima:
                 self.chatbox.typing(False)
 
         spent = self.cost.add(reply.usage.prompt_tokens, reply.usage.output_tokens)
+        self._last_prompt_tokens = reply.usage.prompt_tokens
         text = reply.text
         limit = self.cfg.limits.max_reply_chars
         if len(text) > limit:
@@ -332,6 +343,87 @@ class Anima:
                 return {"status": "error", "detail": "记忆功能未启用"}
             return await self.memory.run_tool(call)
         return self.executor.dispatch(call)
+
+    # ================================================================ 上下文压缩
+
+    async def _maybe_compress(self) -> None:
+        """回合收尾时检查两条触发线(源自 memory_beyond 的压缩方案):
+        - 窗口线:对话轮数到 max_history_turns-1(赶在滑动窗口丢原文之前)
+        - token 线:Gemini 实报 prompt_tokens ≥ threshold×max_context_tokens
+        """
+        cc = self.cfg.compress
+        if not cc.enabled:
+            return
+        count = self.history.user_turn_count()
+        if count <= cc.keep_recent_turns:
+            return
+        window_full = count >= self.cfg.brain.max_history_turns - 1
+        tokens_hot = (
+            cc.max_context_tokens > 0
+            and self._last_prompt_tokens >= cc.threshold * cc.max_context_tokens
+        )
+        if window_full or tokens_hot:
+            await self.compress_now("窗口将满" if window_full else "token 触顶")
+
+    async def compress_now(self, reason: str = "手动") -> bool:
+        """把最近 keep_recent_turns 轮之外的旧对话折进滚动摘要;
+        extract_memories 开着时同一次调用顺带提取长期记忆文件。
+        失败无损:原文还在历史里,最坏退回滑动窗口逐轮丢弃。"""
+        cc = self.cfg.compress
+        old = self.history.compressible_turns(cc.keep_recent_turns)
+        if not old:
+            log.info("没有可压缩的旧回合(最近 %d 轮保留原文)", cc.keep_recent_turns)
+            return False
+        prompt = build_summary_prompt(
+            self.history.summary,
+            render_transcript(old, self.cfg.core.name),
+            cc.extract_memories and self.memory is not None,
+        )
+        try:
+            reply = await self._get_summarizer().reply(
+                [{"role": "user", "parts": [{"text": prompt}]}]
+            )
+        except Exception as e:
+            log.warning("上下文压缩失败(%s),原文保留下回合再试:%s", reason, e)
+            return False
+        spent = self.cost.add(reply.usage.prompt_tokens, reply.usage.output_tokens)
+        summary, drafts = parse_summary_response(reply.text)
+        if not summary:
+            log.warning("压缩模型没产出摘要(%s),本次放弃,原文保留", reason)
+            return False
+        if not self.history.commit_compression(old, summary):
+            log.warning("压缩期间历史有变动(%s),本次放弃,下回合再试", reason)
+            return False
+        written = 0
+        if self.memory is not None:
+            for d in drafts:
+                result = await self.memory.run_tool(
+                    ToolCall(
+                        "memory_write",
+                        {"path": d.filename, "content": render_memory_file(d)},
+                    )
+                )
+                if result.get("status") == "ok":
+                    written += 1
+        n_user = sum(1 for t in old if isinstance(t, UserTurn))
+        log.info(
+            "上下文已压缩(%s):%d 轮旧对话 → %d 字摘要,提取 %d 条记忆($%.4f)",
+            reason, n_user, len(summary), written, spent,
+        )
+        return True
+
+    def _get_summarizer(self) -> GeminiBrain:
+        if self._summarizer is None:
+            # 与主脑同模型同网关,但独立实例:无工具、放宽输出上限
+            # (摘要+记忆 JSON 可能超过主脑的 max_output_tokens)
+            scfg = dataclasses.replace(
+                self.cfg.brain,
+                max_output_tokens=max(2048, self.cfg.brain.max_output_tokens),
+            )
+            self._summarizer = GeminiBrain(
+                scfg, "你是对话上下文压缩器,按消息里的要求输出。", []
+            )
+        return self._summarizer
 
     def _state_line(self) -> str:
         return (

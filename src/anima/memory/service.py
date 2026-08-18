@@ -8,17 +8,55 @@ memstore 是纯文件协议——任何 memory_beyond 兼容程序指向同一�
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from ..brain.base import ToolCall
-from .memstore import MemoryStore, ScopeStore
+from .memstore import MEMORY_FILE_SUFFIX, MemoryStore, ScopeStore
 
 log = logging.getLogger(__name__)
+
+# 上游 memstore 的文件名是纯 ASCII(QQ 场景数字 ID 锚定用不到别的);
+# VRChat 记人以头顶名牌为锚,名牌多是中日文,这里放宽到 \w(含 CJK)。
+# 为保 memstore.py 与上游逐字节一致,放宽以子类实现,不改 vendor 文件。
+_CJK_NAME_RE = re.compile(r"^[\w][\w.-]{0,120}$")
+
+
+class CjkScopeStore(ScopeStore):
+    def _resolve(self, name: str) -> Path | None:
+        name = (name or "").strip().lstrip("/")
+        if not name or not name.endswith(MEMORY_FILE_SUFFIX):
+            return None
+        if not _CJK_NAME_RE.match(name):
+            return None
+        path = (self.root / name).resolve()
+        try:
+            path.relative_to(self.root.resolve())
+        except ValueError:
+            return None
+        return path
+
+    @staticmethod
+    def path_rules() -> str:
+        return (
+            "文件名可用中文、字母、数字、点、下划线、连字符,"
+            f"必须以 {MEMORY_FILE_SUFFIX} 结尾,不允许目录分隔符"
+        )
+
+
+class CjkMemoryStore(MemoryStore):
+    def _scope(self, path: Path) -> ScopeStore:
+        path = path.resolve()
+        store = self._scopes.get(path)
+        if store is None:
+            store = CjkScopeStore(path)
+            self._scopes[path] = store
+        return store
 
 
 class MemoryService:
     def __init__(self, data_dir: Path, session_key: str = "vrchat:main"):
-        self._store = MemoryStore(data_dir / "memory")
+        self._store = CjkMemoryStore(data_dir / "memory")
         self._scope: ScopeStore = self._store.session_scope(session_key)
         self.session_key = session_key
 

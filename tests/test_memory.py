@@ -132,3 +132,36 @@ async def test_read_missing_lists_existing_files(tmp_path):
     result = await svc.run_tool(ToolCall("memory_read", {"path": "nope.md"}))
     assert result["status"] == "error"
     assert "note.md" in result["detail"]  # 报错顺带列出现有文件,方便模型改口
+
+
+async def test_cjk_filename_full_lifecycle(tmp_path):
+    """VRChat 记人以名牌为锚,名牌多是中日文:user-小明.md 全流程可用。"""
+    svc = make_service(tmp_path)
+    content = (
+        "---\nname: user-小明\ndescription: 名牌 小明,养两只猫\n---\n\n"
+        "自称阿明,声音偏低。\n"
+    )
+    ok = await svc.run_tool(
+        ToolCall("memory_write", {"path": "user-小明.md", "content": content})
+    )
+    assert ok["status"] == "ok"
+    assert "user-小明.md" in await svc.index_text()
+    read = await svc.run_tool(ToolCall("memory_read", {"path": "user-小明.md"}))
+    assert read["status"] == "ok" and "自称阿明" in read["content"]
+    hit = await svc.run_tool(ToolCall("memory_search", {"query": "阿明"}))
+    assert any("user-小明.md" in r for r in hit["results"])
+    gone = await svc.run_tool(
+        ToolCall("memory_write", {"path": "user-小明.md", "delete": True})
+    )
+    assert gone["status"] == "ok"
+    assert "user-小明.md" not in await svc.index_text()
+
+
+async def test_cjk_store_still_rejects_traversal_and_separators(tmp_path):
+    """放宽到中文不等于放开路径:分隔符、越权后缀照样拦。"""
+    svc = make_service(tmp_path)
+    for bad in ("../逃逸.md", "子目录/文件.md", "小明.txt", ".md", "小 明.md"):
+        result = await svc.run_tool(
+            ToolCall("memory_write", {"path": bad, "content": "x"})
+        )
+        assert result["status"] == "error", bad

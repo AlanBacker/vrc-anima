@@ -103,3 +103,48 @@ def test_thinking_level_default_and_whitelist(tmp_path):
     p.write_text('[brain.gemini]\nthinking_level = "ultra"\n', encoding="utf-8")
     with pytest.raises(ConfigError, match="thinking_level"):
         load(p)
+
+
+def test_compress_defaults_and_section(tmp_path):
+    cfg = load(None)
+    assert cfg.compress.enabled and cfg.compress.keep_recent_turns == 3
+    assert cfg.compress.max_context_tokens == 0
+    p = tmp_path / "c.toml"
+    p.write_text(
+        "[compress]\nkeep_recent_turns = 5\nmax_context_tokens = 1000000\n"
+        "threshold = 0.8\nextract_memories = false\n",
+        encoding="utf-8",
+    )
+    cfg = load(p)
+    assert cfg.compress.keep_recent_turns == 5
+    assert cfg.compress.max_context_tokens == 1000000
+    assert cfg.compress.threshold == 0.8
+    assert not cfg.compress.extract_memories
+
+
+def test_compress_validation(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text("[compress]\nkeep_recent_turns = 0\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="keep_recent_turns"):
+        load(p)
+    # 保留轮数逼近窗口:压缩永远触发不了,直接拦下
+    p.write_text(
+        "[brain]\nmax_history_turns = 6\n[compress]\nkeep_recent_turns = 5\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="keep_recent_turns"):
+        load(p)
+    # 但压缩关掉时不管这条(纯滑动窗口模式)
+    p.write_text(
+        "[brain]\nmax_history_turns = 6\n"
+        "[compress]\nenabled = false\nkeep_recent_turns = 5\n",
+        encoding="utf-8",
+    )
+    assert load(p).compress.keep_recent_turns == 5
+    for bad in ("0", "1", "1.5"):
+        p.write_text(f"[compress]\nthreshold = {bad}\n", encoding="utf-8")
+        with pytest.raises(ConfigError, match="threshold"):
+            load(p)
+    p.write_text("[compress]\nmax_context_tokens = -1\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="max_context_tokens"):
+        load(p)

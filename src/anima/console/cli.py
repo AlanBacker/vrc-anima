@@ -28,6 +28,7 @@ HELP = """\
   cost            今日成本
   budget reset    预算清零(解除熔断)
   memory          记忆库位置与索引行数
+  compress        压缩状态(轮数/摘要/触发线);compress now 立即压缩
   help            本帮助
   quit            退出 Anima
 """
@@ -35,7 +36,8 @@ HELP = """\
 
 class Console:
     """app 需要提供:status_text() / stop_actions() / panic() / set_mute(bool)
-    / say(text) / cost / memory(可为 None)/ executor / cfg / request_shutdown()。"""
+    / say(text) / cost / memory(可为 None)/ executor / cfg / history
+    / compress_now() / request_shutdown()。"""
 
     def __init__(self, app):
         self._app = app
@@ -118,6 +120,30 @@ class Console:
                 lines = len(index.splitlines()) if index else 0
                 print(
                     f"记忆目录:{app.memory.scope_dir}(索引 {lines} 行)",
+                    flush=True,
+                )
+        elif cmd in ("compress", "压缩"):
+            cc = app.cfg.compress
+            if rest == "now":
+                if not cc.enabled:
+                    print("压缩已在配置中停用([compress].enabled)。", flush=True)
+                elif await app.compress_now():
+                    print("已压缩,详见日志。", flush=True)
+                else:
+                    print("本次没有压缩(无旧回合或失败,详见日志)。", flush=True)
+            else:
+                token_line = (
+                    f"token 线:实报 {app._last_prompt_tokens} / "
+                    f"{cc.threshold:.0%}×{cc.max_context_tokens}"
+                    if cc.max_context_tokens > 0
+                    else "token 线:未启用([compress].max_context_tokens=0)"
+                )
+                print(
+                    f"压缩:{'开' if cc.enabled else '关'} | "
+                    f"对话 {app.history.user_turn_count()}/"
+                    f"{app.cfg.brain.max_history_turns} 轮"
+                    f"(留 {cc.keep_recent_turns} 轮原文) | "
+                    f"摘要 {len(app.history.summary)} 字 | {token_line}",
                     flush=True,
                 )
         elif cmd in ("quit", "exit", "退出"):

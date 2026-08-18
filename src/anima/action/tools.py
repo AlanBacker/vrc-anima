@@ -139,8 +139,9 @@ def build_tool_decls(
                     "path": {
                         "type": "STRING",
                         "description": (
-                            "文件名(不允许目录分隔符),字母数字点下划线连字符,"
-                            "以 .md 结尾,如 friend_xiao_ming.md"
+                            "文件名(不允许目录分隔符),中文/字母/数字/点/下划线/"
+                            "连字符,以 .md 结尾;记人用 user-<名牌名>.md,"
+                            "如 user-小明.md"
                         ),
                     },
                     "content": {

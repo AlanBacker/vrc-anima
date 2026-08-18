@@ -163,6 +163,17 @@ class MemoryConfig:
 
 
 @dataclass
+class CompressConfig:
+    # 上下文压缩(源自 memory_beyond):窗口将满时把旧轮折进滚动摘要,
+    # 取代滑动窗口的静默丢弃;同一次调用顺带把淡出的长期事实提取成记忆
+    enabled: bool = True
+    keep_recent_turns: int = 3     # 压缩时保留原文的最近对话轮数
+    max_context_tokens: int = 0    # >0 时启用 token 触发线(按 Gemini 实报用量)
+    threshold: float = 0.70        # token 触发比例:实报 ≥ threshold×窗口 就压
+    extract_memories: bool = True  # 压缩联动提取记忆文件
+
+
+@dataclass
 class AnimaConfig:
     core: CoreConfig = field(default_factory=CoreConfig)
     osc: OscConfig = field(default_factory=OscConfig)
@@ -178,6 +189,7 @@ class AnimaConfig:
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     costs: CostsConfig = field(default_factory=CostsConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    compress: CompressConfig = field(default_factory=CompressConfig)
     emotes: dict[str, EmoteDef] = field(default_factory=dict)
 
     @property
@@ -278,8 +290,9 @@ def load(path: str | Path | None) -> AnimaConfig:
 
     cfg = AnimaConfig()
     for section_name in (
-        "core", "osc", "audio", "vad", "stt", "screen", "brain",
-        "tts", "state", "calibration", "chatbox", "limits", "costs", "memory",
+        "core", "osc", "audio", "vad", "stt", "screen", "brain", "tts",
+        "state", "calibration", "chatbox", "limits", "costs", "memory",
+        "compress",
     ):
         if section_name in raw:
             cls = type(getattr(cfg, section_name))
@@ -289,7 +302,8 @@ def load(path: str | Path | None) -> AnimaConfig:
 
     unknown_sections = set(raw) - {
         "core", "osc", "audio", "vad", "stt", "screen", "brain", "tts",
-        "state", "calibration", "chatbox", "limits", "costs", "memory", "emotes",
+        "state", "calibration", "chatbox", "limits", "costs", "memory",
+        "compress", "emotes",
     }
     if unknown_sections:
         raise ConfigError(f"配置文件有未知小节:{', '.join(sorted(unknown_sections))}")
@@ -338,3 +352,18 @@ def _validate(cfg: AnimaConfig) -> None:
         raise ConfigError("配置 [screen].turn_frame_px 应在 1–4096 之间")
     if cfg.chatbox.max_chars > 144:
         raise ConfigError("配置 [chatbox].max_chars 不能超过 144(VRChat 聊天框硬上限)")
+    if cfg.compress.keep_recent_turns < 1:
+        raise ConfigError("配置 [compress].keep_recent_turns 至少为 1")
+    if (
+        cfg.compress.enabled
+        and cfg.compress.keep_recent_turns > cfg.brain.max_history_turns - 2
+    ):
+        raise ConfigError(
+            f"配置 [compress].keep_recent_turns({cfg.compress.keep_recent_turns})"
+            f"须比 [brain].max_history_turns({cfg.brain.max_history_turns})至少小 2,"
+            "否则压缩在窗口满前触发不了"
+        )
+    if not 0 < cfg.compress.threshold < 1:
+        raise ConfigError("配置 [compress].threshold 应在 0–1 之间(如 0.70)")
+    if cfg.compress.max_context_tokens < 0:
+        raise ConfigError("配置 [compress].max_context_tokens 不能为负(0=关闭 token 触发)")
