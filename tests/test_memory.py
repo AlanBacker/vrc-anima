@@ -79,11 +79,56 @@ async def test_index_not_directly_writable(tmp_path):
 
 async def test_missing_args_are_errors(tmp_path):
     svc = make_service(tmp_path)
-    assert (await svc.run_tool(ToolCall("memory_read", {})))["status"] == "error"
     assert (await svc.run_tool(ToolCall("memory_search", {"query": " "})))[
         "status"
     ] == "error"
     assert (await svc.run_tool(ToolCall("memory_write", {"path": "a.md"})))[
         "status"
     ] == "error"
+    assert (await svc.run_tool(ToolCall("memory_write", {"content": "x"})))[
+        "status"
+    ] == "error"
     assert (await svc.run_tool(ToolCall("不存在", {})))["status"] == "error"
+
+
+async def test_delete_removes_file_and_index_line(tmp_path):
+    """上游 memory_beyond 约定:delete=true 删文件并同步移除索引行。"""
+    svc = make_service(tmp_path)
+    await svc.run_tool(
+        ToolCall("memory_write", {"path": "note.md", "content": CONTENT})
+    )
+    result = await svc.run_tool(
+        ToolCall("memory_write", {"path": "note.md", "delete": True})
+    )
+    assert result["status"] == "ok" and "已删除" in result["detail"]
+    assert "note.md" not in await svc.index_text()
+    gone = await svc.run_tool(ToolCall("memory_read", {"path": "note.md"}))
+    assert gone["status"] == "error"
+    # 删不存在的文件是错误而不是异常
+    again = await svc.run_tool(
+        ToolCall("memory_write", {"path": "note.md", "delete": True})
+    )
+    assert again["status"] == "error"
+
+
+async def test_read_without_path_returns_full_index(tmp_path):
+    """上游 memory_beyond 约定:path 省略读 MEMORY.md 索引全文。"""
+    svc = make_service(tmp_path)
+    empty = await svc.run_tool(ToolCall("memory_read", {}))
+    assert empty["status"] == "error"  # 空库连索引都还没有
+    await svc.run_tool(
+        ToolCall("memory_write", {"path": "note.md", "content": CONTENT})
+    )
+    result = await svc.run_tool(ToolCall("memory_read", {}))
+    assert result["status"] == "ok"
+    assert "note.md" in result["content"]
+
+
+async def test_read_missing_lists_existing_files(tmp_path):
+    svc = make_service(tmp_path)
+    await svc.run_tool(
+        ToolCall("memory_write", {"path": "note.md", "content": CONTENT})
+    )
+    result = await svc.run_tool(ToolCall("memory_read", {"path": "nope.md"}))
+    assert result["status"] == "error"
+    assert "note.md" in result["detail"]  # 报错顺带列出现有文件,方便模型改口

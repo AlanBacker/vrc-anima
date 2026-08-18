@@ -43,6 +43,7 @@ class MemoryService:
                 return await self._write(
                     str(call.args.get("path", "")),
                     str(call.args.get("content", "")),
+                    bool(call.args.get("delete", False)),
                 )
         except Exception as e:
             log.warning("记忆工具 %s 异常:%s", call.name, e)
@@ -50,13 +51,16 @@ class MemoryService:
         return {"status": "error", "detail": f"未知记忆工具:{call.name}"}
 
     async def _read(self, path: str) -> dict:
-        if not path:
-            return {"status": "error", "detail": "缺少 path 参数"}
+        # 与上游 memory_beyond 同约定:path 省略读 MEMORY.md 索引全文
+        # (注入的索引超长会被截断,这是模型看到完整目录的途径)
+        path = path or "MEMORY.md"
         content = await self._scope.read(path)
         if content is None:
+            existing = self._scope.list_files()
+            listing = "、".join(existing) if existing else "(还没有任何记忆文件)"
             return {
                 "status": "error",
-                "detail": f"没有这个记忆文件:{path}({self._scope.path_rules()})",
+                "detail": f"没有这个记忆文件:{path}。现有文件:{listing}",
             }
         return {"status": "ok", "content": content}
 
@@ -68,10 +72,18 @@ class MemoryService:
             return {"status": "ok", "detail": "没有找到匹配的记忆"}
         return {"status": "ok", "results": results}
 
-    async def _write(self, path: str, content: str) -> dict:
-        if not path or not content.strip():
-            return {"status": "error", "detail": "path 和 content 都不能为空"}
-        report = await self._scope.write(path, content)
+    async def _write(self, path: str, content: str, delete: bool = False) -> dict:
+        if not path:
+            return {"status": "error", "detail": "缺少 path 参数"}
+        if delete:
+            report = await self._scope.delete(path)
+        elif not content.strip():
+            return {
+                "status": "error",
+                "detail": "content 为空。写入需提供完整内容;要删除请设 delete=true",
+            }
+        else:
+            report = await self._scope.write(path, content)
         return {
             "status": "ok" if report.ok else "error",
             "detail": report.message,

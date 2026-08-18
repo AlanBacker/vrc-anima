@@ -108,23 +108,30 @@ def build_tool_decls(
         {
             "name": "memory_read",
             "description": (
-                "读取一条长期记忆的完整内容。path 用 [记忆索引] 或 memory_search "
-                "结果里给出的相对路径。索引里的一句话摘要不够用时再读全文。"
+                "读取一条长期记忆的完整内容。索引只是目录:回答涉及某人某事的"
+                "细节前、更新某条记忆前,先读对应文件,别凭索引行猜。"
+                "path 省略时读 MEMORY.md 索引全文(索引被截断时用)。"
             ),
             "parameters": {
                 "type": "OBJECT",
-                "properties": {"path": {"type": "STRING"}},
-                "required": ["path"],
+                "properties": {
+                    "path": {
+                        "type": "STRING",
+                        "description": "文件名,如 friend_xiao_ming.md;省略=读索引全文",
+                    }
+                },
             },
         },
         {
             "name": "memory_write",
             "description": (
-                "写入长期记忆;path 已存在则整体覆盖(更新前建议先 memory_read 旧文,"
-                "把还有效的内容合并进新版)。值得记:人的名字/长相/喜好、约定、"
-                "重要事件、去过的世界;不值得:寒暄和闲聊流水账。内容用 markdown,"
-                "开头必须是 frontmatter:---、description: 一句话摘要(会展示在"
-                " [记忆索引] 里,搜索也靠它)、---,然后是正文。"
+                "写入、修改或删除一条长期记忆(整文件覆盖;修改=先 memory_read "
+                "读出旧文改写后重写入;删除=delete 设 true)。值得记:人的名字/"
+                "长相/喜好、约定、重要事件、去过的世界;不值得:寒暄和闲聊流水账。"
+                "写前先查重,同一个人同一件事始终更新同一个文件,不另建重复文件。"
+                "格式:开头 frontmatter(---、description: 一句话摘要——它会进 "
+                "[记忆索引] 也是搜索的依据、---),然后 markdown 正文。"
+                "MEMORY.md 索引自动维护,不可直接写。"
             ),
             "parameters": {
                 "type": "OBJECT",
@@ -136,9 +143,16 @@ def build_tool_decls(
                             "以 .md 结尾,如 friend_xiao_ming.md"
                         ),
                     },
-                    "content": {"type": "STRING"},
+                    "content": {
+                        "type": "STRING",
+                        "description": "完整文件内容,含 frontmatter;delete=true 时可省略",
+                    },
+                    "delete": {
+                        "type": "BOOLEAN",
+                        "description": "true=删除该文件并移除其索引行,忽略 content",
+                    },
                 },
-                "required": ["path", "content"],
+                "required": ["path"],
             },
         },
     ]
