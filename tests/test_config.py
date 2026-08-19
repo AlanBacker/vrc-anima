@@ -148,3 +148,20 @@ def test_compress_validation(tmp_path):
     p.write_text("[compress]\nmax_context_tokens = -1\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="max_context_tokens"):
         load(p)
+
+
+def test_puppet_defaults_and_validation(tmp_path):
+    cfg = load(None)
+    assert cfg.puppet.height_m == 1.60
+    assert cfg.puppet.rate_hz == 50.0
+    p = tmp_path / "c.toml"
+    p.write_text("[puppet]\nheight_m = 1.72\nrate_hz = 30\n", encoding="utf-8")
+    cfg = load(p)
+    assert cfg.puppet.height_m == 1.72
+    assert cfg.puppet.rate_hz == 30.0
+    p.write_text("[puppet]\nheight_m = 3.0\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="height_m"):
+        load(p)
+    p.write_text("[puppet]\nrate_hz = 5\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="rate_hz"):
+        load(p)

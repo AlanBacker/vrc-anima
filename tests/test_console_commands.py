@@ -101,3 +101,66 @@ async def test_compress_now_and_disabled(capsys):
     await Console(off)._dispatch("compress now")
     assert off.compress_calls == 0
     assert "停用" in capsys.readouterr().out
+
+
+class _FakePuppet:
+    def __init__(self):
+        self.calls = []
+        self.height_m = 1.6
+        self.rate_hz = 50.0
+
+    def status_text(self):
+        return "木偶状态一行"
+
+    def start(self):
+        self.calls.append("start")
+
+    def request_stop(self):
+        self.calls.append("stop")
+
+    def play(self, name, seconds=8.0):
+        if name == "nope":
+            raise ValueError("未知木偶动作:nope")
+        self.calls.append(f"play:{name}:{seconds:g}")
+        return seconds
+
+
+def _puppet_app():
+    return SimpleNamespace(puppet=_FakePuppet())
+
+
+async def test_puppet_status_on_off(capsys):
+    app = _puppet_app()
+    console = Console(app)
+    await console._dispatch("puppet")
+    assert "木偶状态一行" in capsys.readouterr().out
+    await console._dispatch("puppet on")
+    await console._dispatch("puppet off")
+    assert app.puppet.calls == ["start", "stop"]
+    assert "Calibrate FBT" in capsys.readouterr().out
+
+
+async def test_puppet_play_with_seconds_and_unknown(capsys):
+    app = _puppet_app()
+    console = Console(app)
+    await console._dispatch("puppet sway 12")
+    await console._dispatch("puppet bob")
+    assert app.puppet.calls == ["play:sway:12", "play:bob:8"]
+    assert "12 秒后自动回中立" in capsys.readouterr().out
+    await console._dispatch("puppet nope")
+    assert "用法" in capsys.readouterr().out
+    assert app.puppet.calls == ["play:sway:12", "play:bob:8"]
+
+
+async def test_puppet_height_rate_set_and_reject(capsys):
+    app = _puppet_app()
+    console = Console(app)
+    await console._dispatch("puppet height 1.72")
+    assert app.puppet.height_m == 1.72
+    await console._dispatch("puppet rate 30")
+    assert app.puppet.rate_hz == 30.0
+    assert "config.toml" in capsys.readouterr().out
+    await console._dispatch("puppet height 9")
+    await console._dispatch("puppet rate 5")
+    assert app.puppet.height_m == 1.72 and app.puppet.rate_hz == 30.0
+    assert "用法" in capsys.readouterr().out

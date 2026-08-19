@@ -163,6 +163,13 @@ class MemoryConfig:
 
 
 @dataclass
+class PuppetConfig:
+    # 木偶层(实验):经 OSC Trackers 流送身体姿态(控制台 puppet 命令)
+    height_m: float = 1.60       # 追踪空间身高,须与游戏内 User Real Height 一致
+    rate_hz: float = 50.0        # 姿态流送频率
+
+
+@dataclass
 class CompressConfig:
     # 上下文压缩(源自 memory_beyond):窗口将满时把旧轮折进滚动摘要,
     # 取代滑动窗口的静默丢弃;同一次调用顺带把淡出的长期事实提取成记忆
@@ -190,6 +197,7 @@ class AnimaConfig:
     costs: CostsConfig = field(default_factory=CostsConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     compress: CompressConfig = field(default_factory=CompressConfig)
+    puppet: PuppetConfig = field(default_factory=PuppetConfig)
     emotes: dict[str, EmoteDef] = field(default_factory=dict)
 
     @property
@@ -292,7 +300,7 @@ def load(path: str | Path | None) -> AnimaConfig:
     for section_name in (
         "core", "osc", "audio", "vad", "stt", "screen", "brain", "tts",
         "state", "calibration", "chatbox", "limits", "costs", "memory",
-        "compress",
+        "compress", "puppet",
     ):
         if section_name in raw:
             cls = type(getattr(cfg, section_name))
@@ -303,7 +311,7 @@ def load(path: str | Path | None) -> AnimaConfig:
     unknown_sections = set(raw) - {
         "core", "osc", "audio", "vad", "stt", "screen", "brain", "tts",
         "state", "calibration", "chatbox", "limits", "costs", "memory",
-        "compress", "emotes",
+        "compress", "puppet", "emotes",
     }
     if unknown_sections:
         raise ConfigError(f"配置文件有未知小节:{', '.join(sorted(unknown_sections))}")
@@ -367,3 +375,11 @@ def _validate(cfg: AnimaConfig) -> None:
         raise ConfigError("配置 [compress].threshold 应在 0–1 之间(如 0.70)")
     if cfg.compress.max_context_tokens < 0:
         raise ConfigError("配置 [compress].max_context_tokens 不能为负(0=关闭 token 触发)")
+    if not 0.5 <= cfg.puppet.height_m <= 2.5:
+        raise ConfigError(
+            f"配置 [puppet].height_m 应在 0.5–2.5 米之间,得到 {cfg.puppet.height_m!r}"
+        )
+    if not 10 <= cfg.puppet.rate_hz <= 100:
+        raise ConfigError(
+            f"配置 [puppet].rate_hz 应在 10–100 之间,得到 {cfg.puppet.rate_hz!r}"
+        )

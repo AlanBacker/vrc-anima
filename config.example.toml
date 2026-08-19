@@ -104,6 +104,13 @@ max_context_tokens = 0    # >0 启用 token 触发线(按 Gemini 实报用量;�
 threshold = 0.70          # token 触发比例:实报 ≥ threshold×max_context_tokens 就压
 extract_memories = true   # 压缩联动提取记忆
 
+[puppet]
+# 木偶层(实验):经官方 OSC Trackers 协议流送身体姿态(躯干/下肢动作,
+# 任何 Avatar 免改造)。桌面模式接收为社区实证、官方未文档化——用控制台
+# 验证:puppet on → 游戏内快捷菜单 Calibrate FBT(T 姿)→ puppet sway。
+height_m = 1.60           # 追踪空间身高(米),须与游戏内 User Real Height 一致
+rate_hz = 50.0            # 姿态流送频率(Hz)
+
 # Emote 映射:依所选 Avatar 的参数表配置(参数名在 Avatar 的 OSC json 里)
 # [emotes]
 # wave = { address = "/avatar/parameters/EmoteWave", value = 1, hold_ms = 500, reset_value = 0 }

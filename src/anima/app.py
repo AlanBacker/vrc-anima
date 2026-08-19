@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 from .action.executor import SNAPSHOT_SENTINEL, ActionExecutor
+from .action.puppet import PuppetDriver
 from .action.speech import SpeechPipeline
 from .action.tools import MEMORY_TOOLS, build_tool_decls
 from .audio.capture import MicCapture
@@ -114,6 +115,9 @@ class Anima:
         self._summarizer: GeminiBrain | None = None  # 压缩用,首次触发时建
         self._last_prompt_tokens = 0
         self.executor = ActionExecutor(self.motor, cfg.calibration, cfg.emotes)
+        self.puppet = PuppetDriver(
+            self.motor.send, cfg.puppet.height_m, cfg.puppet.rate_hz
+        )
         self.speech = SpeechPipeline(
             self.motor,
             self.chatbox,
@@ -200,6 +204,10 @@ class Anima:
         self.speech.interrupt()
         if self._capture_ok:
             self.capture.stop()
+        try:
+            await self.puppet.shutdown()
+        except Exception:
+            pass
         try:
             await self.executor.stop_everything()
         except Exception:
@@ -486,11 +494,13 @@ class Anima:
         return "\n".join(lines)
 
     async def stop_actions(self) -> None:
+        self.puppet.calm()
         await self.executor.stop_everything()
 
     async def panic(self) -> None:
-        """急停:打断说话 + 停动作 + Avatar 安全模式。"""
+        """急停:打断说话 + 断木偶流 + 停动作 + Avatar 安全模式。"""
         self.speech.interrupt()
+        self.puppet.panic_off()
         await self.executor.stop_everything()
         await self.motor.panic()
 

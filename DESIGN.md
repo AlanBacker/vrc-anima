@@ -116,6 +116,8 @@ flowchart LR
 
 OSC 硬约束备忘:桌面模式**无法交互**(Use/Grab/Drop 全部 VR-Only)、无蹲伏;轴值不清零会永远走下去——执行器兜底看门狗:任何动作超时强制清零。
 
+**木偶层(v1.4 实验追加,非预设身体动作)**:经官方 OSC Trackers 协议(`/tracking/trackers/1..8/position|rotation` + `head` 对齐参考;Unity 左手系、+Y 向上、米制;旋转为欧拉角、按 Z→X→Y 应用)流送程序化身体姿态,任何 Avatar 免改造。先只送 head+髋+双脚——官方明说点越少 IK 补偿越好,这也是让 VRChat 自带 IK 替我们解算膝盖的取巧位。铁律:**姿态流必须连续**——一切目标切换经指数平滑,动作播完淡回中立位,永不发跳变(IK 吃到瞬移会抽风);panic 立即断流。桌面模式接收为社区实证、官方未文档化 ⚠️(§12 验证项)。验证通过后按三层长大:①连续通道层(本层,`PuppetDriver`)→ ②参数化生成器/关键帧层(`sway`/`bob` 等程序化函数;`play_frames()` 即 text-to-motion provider 接口位——文本→骨骼动作小模型的输出经"关节→追踪点"换算入场,权重不随仓库分发)→ ③模型侧 `motion` 工具(M2/M3 再暴露,呼应 Q10"接口为连续意图预留")。手臂/手指走路线二(Avatar 木偶参数,需一次性 Unity 改造),另立专章再做。
+
 ## 5. 状态机与模式
 
 ```mermaid
@@ -219,6 +221,7 @@ stateDiagram-v2
 - [ ] `output_log*.txt` 在 Proton prefix 下的路径与玩家进出事件格式
 - [ ] 半双工模式下回声残留程度(决定是否提前上 AEC)
 - [ ] SenseVoice-small 在 VRChat 主机 CPU 上的实时率与嘈杂房间转写质量(定默认 STT 档位)
+- [ ] OSC Trackers 桌面模式接收 ⚠️(官方未文档化):控制台 `puppet on` → 游戏内快捷菜单 Calibrate FBT(T 姿,身高与 User Real Height 一致)→ `puppet sway` 看角色扭不扭;顺带记录:校准是否可重复、断流(`puppet off`/panic)后角色姿态如何恢复
 
 ## 附录 A · 决策记录(拷问会话 Q1–Q20)
 
