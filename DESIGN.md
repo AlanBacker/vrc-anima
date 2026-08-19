@@ -64,7 +64,7 @@ flowchart LR
 
 **音频出**:TTS/模型音频 → PipeWire 虚拟源 → VRChat 麦克风;游戏内关闭"Toggle Voice"后,`/input/Voice` 为推挽式(1=开麦 0=静音),说话时开、说完关。
 
-**回声抑制**:bot 的声音会经游戏混音被自己听见。v1 采用**半双工**:自己说话期间暂停切句(丢弃捕获);后续可加 AEC(webrtc-apm)升级为全双工。
+**回声抑制**:bot 的声音会经游戏混音被自己听见。v1 采用**半双工**:自己说话期间暂停切句(丢弃捕获);后续可加 AEC(webrtc-apm)升级为全双工。**插话打断(v1.4 追加,`[audio].barge_in` 默认开)**:说话期间采集门保持敞开、听觉循环与回合处理解耦(切句实时、回合排队),有人开口(连续语音过 VAD 去抖)就立刻打断播放转入聆听,本回合剩余追问文本也不再开口。依据:VRChat 不回放本人麦克风,虚拟声卡路由下自声无回灌通路;若世界有舞台麦类自声回放导致自我打断,关掉该项退回半双工(⚠️ §12 验证)。
 
 ## 3. 大脑层
 
@@ -221,7 +221,8 @@ stateDiagram-v2
 - [ ] `output_log*.txt` 在 Proton prefix 下的路径与玩家进出事件格式
 - [ ] 半双工模式下回声残留程度(决定是否提前上 AEC)
 - [ ] SenseVoice-small 在 VRChat 主机 CPU 上的实时率与嘈杂房间转写质量(定默认 STT 档位)
-- [ ] OSC Trackers 桌面模式接收 ⚠️(官方未文档化):控制台 `puppet on` → 游戏内快捷菜单 Calibrate FBT(T 姿,身高与 User Real Height 一致)→ `puppet sway` 看角色扭不扭;顺带记录:校准是否可重复、断流(`puppet off`/panic)后角色姿态如何恢复
+- [ ] OSC Trackers 桌面模式接收 ⚠️(官方未文档化):控制台 `puppet on` → 游戏内快捷菜单 Calibrate FBT(T 姿,身高与 User Real Height 一致)→ `puppet sway` 看角色扭不扭;顺带记录:校准是否可重复、断流(`puppet off`/panic)后角色姿态如何恢复(2026-08 实测:桌面模式无 Calibrate FBT 入口——官方在无头显时隐藏全部 FBT 设置;待试 null driver 假头显)
+- [ ] 插话打断:bot 说话中旁人开口 ≥min_speech_ms 是否立即闭嘴并接话茬;若她"自己打断自己"(开口瞬间即被打断)说明该世界有自声回放,关 `[audio].barge_in`
 
 ## 附录 A · 决策记录(拷问会话 Q1–Q20)
 

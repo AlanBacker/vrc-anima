@@ -63,3 +63,20 @@ def test_empty_call_id_becomes_none():
 def test_unknown_part_raises():
     with pytest.raises(ValueError):
         to_genai_contents([{"role": "user", "parts": [{"bogus": 1}]}], types)
+
+
+def test_thought_signature_round_trip():
+    contents = [
+        {
+            "role": "model",
+            "parts": [
+                {"text": "想了想", "sig": b"sig-text"},
+                {"call": {"name": "jump", "args": {}, "id": "c1", "sig": b"sig-call"}},
+                {"call": {"name": "move", "args": {}, "id": "c2"}},
+            ],
+        }
+    ]
+    out = to_genai_contents(contents, types)
+    assert out[0].parts[0].thought_signature == b"sig-text"
+    assert out[0].parts[1].thought_signature == b"sig-call"
+    assert out[0].parts[2].thought_signature is None

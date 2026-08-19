@@ -48,7 +48,8 @@ class AudioConfig:
     output_device: str = ""      # 虚拟麦克风 sink(名称或序号,空=系统默认)
     sample_rate: int = 16000
     input_gain: float = 1.0      # 输入软件增益(游戏声太小时调大,如 2.0;VAD/STT 都吃增益后的)
-    echo_tail_ms: int = 300      # 半双工:说完话后额外静默的尾巴
+    echo_tail_ms: int = 300      # 半双工:说完话后额外静默的尾巴(barge_in 开时不用)
+    barge_in: bool = True        # 插话打断:bot 说话时有人开口就闭嘴聆听;世界会回放自己声音时关掉
 
 
 @dataclass

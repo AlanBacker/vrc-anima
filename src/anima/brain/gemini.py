@@ -23,7 +23,12 @@ def to_genai_contents(contents: list[dict], types) -> list:
         for part in content["parts"]:
             if "text" in part:
                 if part["text"]:
-                    parts.append(types.Part(text=part["text"]))
+                    parts.append(
+                        types.Part(
+                            text=part["text"],
+                            thought_signature=part.get("sig") or None,
+                        )
+                    )
             elif "jpeg" in part:
                 parts.append(
                     types.Part.from_bytes(data=part["jpeg"], mime_type="image/jpeg")
@@ -40,7 +45,9 @@ def to_genai_contents(contents: list[dict], types) -> list:
                             name=call["name"],
                             args=call["args"],
                             id=call["id"] or None,
-                        )
+                        ),
+                        # Gemini 3:functionCall 回传缺思考签名会被 400
+                        thought_signature=call.get("sig") or None,
                     )
                 )
             elif "resp" in part:
@@ -133,19 +140,26 @@ class GeminiBrain:
         )
 
         text_parts: list[str] = []
+        text_sig: bytes | None = None
         calls: list[ToolCall] = []
         if response.candidates:
             content = response.candidates[0].content
             for part in content.parts or []:
+                sig = getattr(part, "thought_signature", None)
                 if getattr(part, "text", None):
                     text_parts.append(part.text)
+                    if sig and text_sig is None:
+                        text_sig = sig
                 fc = getattr(part, "function_call", None)
                 if fc is not None:
+                    if not sig:
+                        _warn_missing_signature()
                     calls.append(
                         ToolCall(
                             name=fc.name,
                             args=dict(fc.args or {}),
                             call_id=fc.id or "",
+                            thought_signature=sig,
                         )
                     )
 
@@ -158,5 +172,24 @@ class GeminiBrain:
             )
 
         return BrainReply(
-            text="".join(text_parts).strip(), tool_calls=calls, usage=usage
+            text="".join(text_parts).strip(),
+            tool_calls=calls,
+            usage=usage,
+            text_signature=text_sig,
         )
+
+
+_warned_missing_sig = False
+
+
+def _warn_missing_signature() -> None:
+    """functionCall 部件没带思考签名:多半是中间网关把字段剥掉了。
+    回传历史会缺签名,Gemini 3 系可能 400——一次性告警指路。"""
+    global _warned_missing_sig
+    if _warned_missing_sig:
+        return
+    _warned_missing_sig = True
+    log.warning(
+        "模型返回的 functionCall 没带 thought_signature(网关剥字段?)。"
+        "带工具的下一回合若报 400 missing thought_signature,查网关透传"
+    )

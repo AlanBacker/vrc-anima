@@ -6,10 +6,11 @@
 
 render() 输出的是中立结构(dict),不依赖任何 SDK:
   {"role": "user"|"model"|"tool", "parts": [
-      {"text": str} | {"jpeg": bytes} | {"wav": bytes}
-      | {"call": {"name","args","id"}} | {"resp": {"name","result","id"}}
+      {"text": str[, "sig": bytes]} | {"jpeg": bytes} | {"wav": bytes}
+      | {"call": {"name","args","id"[, "sig"]}} | {"resp": {"name","result","id"}}
   ]}
-由 brain/gemini.py 负责翻译成 google-genai 的类型。
+由 brain/gemini.py 负责翻译成 google-genai 的类型。"sig" 是 Gemini 3 系
+的思考签名:模型部件带回来什么就原样还回去,functionCall 缺了会 400。
 """
 
 from __future__ import annotations
@@ -134,11 +135,15 @@ class History:
         if isinstance(turn, AssistantTurn):
             parts = []
             if turn.text:
-                parts.append({"text": turn.text})
+                part = {"text": turn.text}
+                if turn.text_signature:
+                    part["sig"] = turn.text_signature
+                parts.append(part)
             for call in turn.tool_calls:
-                parts.append(
-                    {"call": {"name": call.name, "args": call.args, "id": call.call_id}}
-                )
+                c = {"name": call.name, "args": call.args, "id": call.call_id}
+                if call.thought_signature:
+                    c["sig"] = call.thought_signature
+                parts.append({"call": c})
             if not parts:  # 空回应(理论上不会有):跳过,Gemini 不收空 parts
                 return []
             return [{"role": "model", "parts": parts}]

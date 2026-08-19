@@ -34,7 +34,7 @@ class Tts:
         yield b"pcm"
 
 
-def make_pipeline(events, *, ok=True, echo_tail_ms=250):
+def make_pipeline(events, *, ok=True, echo_tail_ms=250, barge_in=False):
     async def fake_sleep(s):
         events.append(("sleep", round(s, 3)))
 
@@ -46,6 +46,7 @@ def make_pipeline(events, *, ok=True, echo_tail_ms=250):
         Tts(),
         capture=Cap(events),
         echo_tail_ms=echo_tail_ms,
+        barge_in=barge_in,
         sleep=fake_sleep,
     )
 
@@ -99,3 +100,15 @@ async def test_interrupt_stops_player():
     sp = make_pipeline(events)
     sp.interrupt()
     assert events == [("stop",)]
+
+
+async def test_barge_in_keeps_gate_open():
+    """插话打断模式:说话期间不关采集门、不等回声尾。"""
+    events: list = []
+    sp = make_pipeline(events, barge_in=True)
+    await sp.speak("你好")
+    assert events == [
+        ("/input/Voice", 1),
+        ("play",),
+        ("/input/Voice", 0),
+    ]

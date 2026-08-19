@@ -39,9 +39,14 @@ class _FakeCost:
 class _FakeSpeech:
     def __init__(self):
         self.spoken = []
+        self.speaking = False
+        self.interrupts = 0
 
     async def speak(self, text):
         self.spoken.append(text)
+
+    def interrupt(self):
+        self.interrupts += 1
 
 
 def _make_app(script):
@@ -54,8 +59,10 @@ def _make_app(script):
     app.history = History(20)
     app.speech = _FakeSpeech()
     app.executor = _FakeExecutor()
+    app.segmenter = None
     app._summarizer = None
     app._last_prompt_tokens = 0
+    app._turn_interrupted = False
     return app
 
 
@@ -207,3 +214,61 @@ def test_maybe_compress_token_trigger_and_disable():
     _fill_rounds(app2, 4)
     asyncio.run(app2._maybe_compress())  # 总开关关着,窗口满也不动
     assert app2._summarizer.calls == 0
+
+
+# ------------------------------------------------------------------ 思考签名 / 插话打断
+
+from types import SimpleNamespace  # noqa: E402
+
+
+def test_thought_signatures_flow_into_history():
+    """响应里的思考签名要存进历史(渲染时原样带回,Gemini 3 强校验)。"""
+    r = BrainReply(
+        text="看我跳",
+        tool_calls=[ToolCall("jump", {}, "c1", thought_signature=b"s1")],
+        usage=TokenUsage(),
+        text_signature=b"st",
+    )
+    app = _make_app([r])
+    asyncio.run(app._brain_cycle(depth=0))
+    turn = next(t for t in app.history.turns if isinstance(t, AssistantTurn))
+    assert turn.text_signature == b"st"
+    assert turn.tool_calls[0].thought_signature == b"s1"
+
+
+def test_barge_in_interrupts_and_mutes_rest_of_turn():
+    app = _make_app([_reply(text="这句不该再说出口")])
+    app.cfg.audio.barge_in = True
+    app.speech.speaking = True
+    app.segmenter = SimpleNamespace(in_speech=True)
+    app._maybe_barge_in()
+    assert app.speech.interrupts == 1
+    assert app._turn_interrupted
+    asyncio.run(app._brain_cycle(depth=0))  # 同一回合的后续文本保持沉默
+    assert app.speech.spoken == []
+
+
+def test_barge_in_needs_switch_speech_and_speaking():
+    app = _make_app([])
+    app.segmenter = SimpleNamespace(in_speech=True)
+    app.speech.speaking = True
+    app.cfg.audio.barge_in = False  # 开关关着
+    app._maybe_barge_in()
+    app.cfg.audio.barge_in = True
+    app.segmenter.in_speech = False  # 没人说话
+    app._maybe_barge_in()
+    app.segmenter.in_speech = True
+    app.speech.speaking = False  # bot 没在说话:正常聆听,无需打断
+    app._maybe_barge_in()
+    assert app.speech.interrupts == 0
+    assert not app._turn_interrupted
+
+
+def test_utterance_queue_drops_oldest_when_full():
+    app = _make_app([])
+    app._utterances = asyncio.Queue(maxsize=2)
+    app._enqueue_utterance("一")
+    app._enqueue_utterance("二")
+    app._enqueue_utterance("三")
+    assert app._utterances.get_nowait() == "二"
+    assert app._utterances.get_nowait() == "三"

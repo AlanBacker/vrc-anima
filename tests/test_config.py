@@ -165,3 +165,10 @@ def test_puppet_defaults_and_validation(tmp_path):
     p.write_text("[puppet]\nrate_hz = 5\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="rate_hz"):
         load(p)
+
+
+def test_audio_barge_in_flag(tmp_path):
+    assert load(None).audio.barge_in  # 默认开
+    p = tmp_path / "c.toml"
+    p.write_text("[audio]\nbarge_in = false\n", encoding="utf-8")
+    assert not load(p).audio.barge_in

@@ -70,6 +70,10 @@ class Anima:
         self._capture_ok = False
         self._osc_transport = None
         self.segmenter: UtteranceSegmenter | None = None
+        self._turn_interrupted = False  # 本回合被插话打断:剩余文本不再开口
+        # 听觉循环只管切句,回合处理在独立任务里消费——说话/思考期间
+        # 耳朵不停,插话才可能被听见
+        self._utterances: asyncio.Queue = asyncio.Queue(maxsize=3)
 
         self.motor = OscMotor(cfg.osc.host, cfg.osc.send_port)
         self.self_state = SelfState()
@@ -125,6 +129,7 @@ class Anima:
             self.tts,
             self.capture,
             echo_tail_ms=cfg.audio.echo_tail_ms,
+            barge_in=cfg.audio.barge_in,
         )
 
         decls = build_tool_decls(
@@ -185,6 +190,7 @@ class Anima:
         ]
         if self._capture_ok:
             watch.append(asyncio.create_task(self._listen_loop(), name="listen"))
+            watch.append(asyncio.create_task(self._turn_loop(), name="turns"))
 
         try:
             done, _ = await asyncio.wait(watch, return_when=asyncio.FIRST_COMPLETED)
@@ -223,11 +229,40 @@ class Anima:
                 pass
 
     async def _listen_loop(self) -> None:
+        """只做实时的事:VAD 切句 + 插话检测。回合处理丢给 _turn_loop。"""
         assert self.segmenter is not None
         async for frame in self.capture.frames():
             utterance = self.segmenter.feed(frame)
-            if utterance is None:
-                continue
+            self._maybe_barge_in()
+            if utterance is not None:
+                self._enqueue_utterance(utterance)
+
+    def _maybe_barge_in(self) -> None:
+        """bot 说话时有人开口(连续语音过了 VAD 去抖)→ 立刻闭嘴聆听。
+        本回合后续追问轮的文本也不再开口,让下一回合去接人话茬。"""
+        if not self.cfg.audio.barge_in:
+            return
+        if self.segmenter is None or not self.segmenter.in_speech:
+            return
+        if self.speech.speaking and not self._turn_interrupted:
+            self._turn_interrupted = True
+            log.info("有人插话:打断说话,转入聆听")
+            self.speech.interrupt()
+
+    def _enqueue_utterance(self, utterance) -> None:
+        try:
+            self._utterances.put_nowait(utterance)
+        except asyncio.QueueFull:
+            log.warning("回合没处理完又积了新话,丢最早的一段")
+            try:
+                self._utterances.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            self._utterances.put_nowait(utterance)
+
+    async def _turn_loop(self) -> None:
+        while True:
+            utterance = await self._utterances.get()
             try:
                 await self._on_utterance(utterance)
             except Exception:
@@ -269,6 +304,7 @@ class Anima:
 
     async def run_turn(self, text: str, pcm=None) -> None:
         """一个完整回合:组装上下文 → 大脑 → 说话/动作。"""
+        self._turn_interrupted = False
         frame = await self.screen.agrab_jpeg(self.cfg.screen.turn_frame_px)
         wav = None
         if pcm is not None and self.cfg.brain.attach_audio:
@@ -310,7 +346,13 @@ class Anima:
             f" [{len(reply.tool_calls)} 个动作]" if reply.tool_calls else "",
             spent,
         )
-        self.history.add(AssistantTurn(text=text, tool_calls=reply.tool_calls))
+        self.history.add(
+            AssistantTurn(
+                text=text,
+                tool_calls=reply.tool_calls,
+                text_signature=reply.text_signature,
+            )
+        )
 
         for call in reply.tool_calls:
             result = await self._run_tool(call)
@@ -338,7 +380,9 @@ class Anima:
         # 走完路搭句话,或继续沉默)。说话与追问并行,追问回合的说话在
         # 锁上自然排队;depth 封顶防"工具→追问→工具"打转。
         speak_task = (
-            asyncio.create_task(self.speech.speak(text)) if text else None
+            asyncio.create_task(self.speech.speak(text))
+            if text and not self._turn_interrupted
+            else None
         )
         if reply.tool_calls and depth < 2:
             await self._brain_cycle(depth + 1)

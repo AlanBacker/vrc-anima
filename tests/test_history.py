@@ -186,3 +186,22 @@ def test_clear_resets_summary():
     assert h.commit_compression(h.turns[:1], "摘要")
     h.clear()
     assert h.summary == "" and len(h) == 0
+
+
+def test_thought_signatures_render_and_omit_when_absent():
+    h = History(20)
+    h.add(UserTurn(text="喂"))
+    h.add(
+        AssistantTurn(
+            text="好",
+            text_signature=b"ts",
+            tool_calls=[
+                ToolCall("jump", {}, "c1", thought_signature=b"cs"),
+                ToolCall("move", {"direction": "front"}, "c2"),
+            ],
+        )
+    )
+    model = h.render()[1]
+    assert model["parts"][0] == {"text": "好", "sig": b"ts"}
+    assert model["parts"][1]["call"]["sig"] == b"cs"
+    assert "sig" not in model["parts"][2]["call"]  # 没有就不带,别发空值

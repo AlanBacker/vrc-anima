@@ -9,7 +9,12 @@
   6. 等回声尾 echo_tail_ms(房间混响/虚拟声卡回灌的余音)
   7. 开采集门
 
-整个 speak 持锁——一次只说一句;interrupt() 给 panic/关停用。
+整个 speak 持锁——一次只说一句;interrupt() 给 panic/关停/插话打断用。
+
+barge_in=True(插话打断)时第 1/6/7 步跳过:说话期间采集门保持敞开,
+让 VAD 能听见有人开口,app 层检测到插话就 interrupt()。前提是 bot 的
+声音不会回灌进自己耳朵(VRChat 不回放本人麦克风;若世界会回放,请关
+[audio].barge_in 退回半双工)。
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ class SpeechPipeline:
         tts,
         capture=None,
         echo_tail_ms: int = 300,
+        barge_in: bool = False,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
         self._motor = motor
@@ -38,6 +44,7 @@ class SpeechPipeline:
         self._tts = tts
         self._capture = capture
         self._echo_tail_ms = echo_tail_ms
+        self._barge_in = barge_in
         self._sleep = sleep
         self._lock = asyncio.Lock()
         self._bg: set[asyncio.Task] = set()
@@ -55,7 +62,8 @@ class SpeechPipeline:
         if not text:
             return
         async with self._lock:
-            if self._capture is not None:
+            gate = self._capture is not None and not self._barge_in
+            if gate:
                 self._capture.gate(True)
             try:
                 if self._chatbox is not None:
@@ -71,6 +79,6 @@ class SpeechPipeline:
                     finally:
                         self._motor.voice(False)
             finally:
-                if self._capture is not None:
+                if gate:
                     await self._sleep(self._echo_tail_ms / 1000)
                     self._capture.gate(False)

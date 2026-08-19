@@ -20,7 +20,10 @@ input_device = "anima_ears.monitor"   # 她的耳朵:游戏声音汇入的 sink 
 output_device = "anima_mouth"         # 她的嘴:VRChat 麦克风所指的 sink
 sample_rate = 16000
 input_gain = 1.0          # 输入软件增益:游戏里人声太小(mic 电平总在 -35dB 以下)时调大,如 2.0~4.0;电平条/VAD/转写吃的都是增益后的信号
-echo_tail_ms = 300        # 半双工:说完话后多静默一小段,吃掉残响
+echo_tail_ms = 300        # 半双工:说完话后多静默一小段,吃掉残响(barge_in 开时不使用)
+barge_in = true           # 插话打断:她说话时有人开口(连续语音过 VAD 去抖)就立刻闭嘴聆听。
+                          # 前提是自己的声音不回灌耳朵(VRChat 不回放本人麦;若所在世界会回放
+                          # 舞台麦之类导致她自己打断自己,把这项关掉退回半双工)
 
 [vad]
 backend = "silero"        # silero(推荐)| energy(纯能量门限,兜底)

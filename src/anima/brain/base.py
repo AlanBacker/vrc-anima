@@ -16,6 +16,9 @@ class ToolCall:
     name: str
     args: dict
     call_id: str = ""
+    # Gemini 3 系思考签名:响应里 functionCall 部件自带,回传历史时必须
+    # 原样带回,缺了会被 400(strict validation)
+    thought_signature: bytes | None = None
 
 
 @dataclass
@@ -40,6 +43,7 @@ class AssistantTurn:
 
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
+    text_signature: bytes | None = None  # 文本部件的思考签名(有就回传)
 
 
 @dataclass
@@ -60,3 +64,4 @@ class BrainReply:
     text: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage = field(default_factory=TokenUsage)
+    text_signature: bytes | None = None
