@@ -22,6 +22,11 @@ def test_look_pitch_gated_by_config():
     assert "look_pitch" not in names(build_tool_decls([], False))
 
 
+def test_motion_gated_by_config():
+    assert "motion" in names(build_tool_decls([], True))  # 默认声明
+    assert "motion" not in names(build_tool_decls([], True, False))
+
+
 def test_memory_tools_declared():
     assert MEMORY_TOOLS <= set(names(build_tool_decls([], True)))
 

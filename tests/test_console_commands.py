@@ -106,63 +106,67 @@ async def test_compress_now_and_disabled(capsys):
 class _FakePuppet:
     def __init__(self):
         self.calls = []
-        self.height_m = 1.6
-        self.rate_hz = 50.0
 
     def status_text(self):
         return "木偶状态一行"
 
-    def start(self):
-        self.calls.append("start")
+    def rest(self):
+        self.calls.append("rest")
 
-    def request_stop(self):
-        self.calls.append("stop")
+    def panic_off(self):
+        self.calls.append("off")
 
-    def play(self, name, seconds=8.0):
+    def play(self, name, seconds=None):
         if name == "nope":
             raise ValueError("未知木偶动作:nope")
-        self.calls.append(f"play:{name}:{seconds:g}")
-        return seconds
+        self.calls.append(("play", name, seconds))
+        return seconds or 4.0
+
+    def pose(self, targets, seconds=None):
+        self.calls.append(("pose", targets, seconds))
+        return seconds or 8.0
 
 
 def _puppet_app():
     return SimpleNamespace(puppet=_FakePuppet())
 
 
-async def test_puppet_status_on_off(capsys):
+async def test_puppet_status_rest_off(capsys):
     app = _puppet_app()
     console = Console(app)
     await console._dispatch("puppet")
     assert "木偶状态一行" in capsys.readouterr().out
-    await console._dispatch("puppet on")
+    await console._dispatch("puppet rest")
     await console._dispatch("puppet off")
-    assert app.puppet.calls == ["start", "stop"]
-    assert "Calibrate FBT" in capsys.readouterr().out
+    assert app.puppet.calls == ["rest", "off"]
+    out = capsys.readouterr().out
+    assert "收势" in out and "断开" in out
 
 
 async def test_puppet_play_with_seconds_and_unknown(capsys):
     app = _puppet_app()
     console = Console(app)
     await console._dispatch("puppet sway 12")
-    await console._dispatch("puppet bob")
-    assert app.puppet.calls == ["play:sway:12", "play:bob:8"]
-    assert "12 秒后自动回中立" in capsys.readouterr().out
+    await console._dispatch("puppet wave")
+    assert app.puppet.calls == [("play", "sway", 12.0), ("play", "wave", None)]
+    assert "12 秒后自动收势" in capsys.readouterr().out
     await console._dispatch("puppet nope")
+    await console._dispatch("puppet sway 十二")
     assert "用法" in capsys.readouterr().out
-    assert app.puppet.calls == ["play:sway:12", "play:bob:8"]
+    assert len(app.puppet.calls) == 2
 
 
-async def test_puppet_height_rate_set_and_reject(capsys):
+async def test_puppet_pose_parses_axes_and_seconds(capsys):
     app = _puppet_app()
     console = Console(app)
-    await console._dispatch("puppet height 1.72")
-    assert app.puppet.height_m == 1.72
-    await console._dispatch("puppet rate 30")
-    assert app.puppet.rate_hz == 30.0
-    assert "config.toml" in capsys.readouterr().out
-    await console._dispatch("puppet height 9")
-    await console._dispatch("puppet rate 5")
-    assert app.puppet.height_m == 1.72 and app.puppet.rate_hz == 30.0
+    await console._dispatch("puppet pose arm_r_up=0.8 lean_x=-0.3 5")
+    assert app.puppet.calls == [
+        ("pose", {"arm_r_up": 0.8, "lean_x": -0.3}, 5.0)
+    ]
+    assert "保持约 5 秒" in capsys.readouterr().out
+    await console._dispatch("puppet pose")
+    await console._dispatch("puppet pose lean_x=歪")
+    assert app.puppet.calls[1:] == []
     assert "用法" in capsys.readouterr().out
 
 

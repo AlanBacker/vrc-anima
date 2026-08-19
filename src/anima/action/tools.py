@@ -1,22 +1,26 @@
-"""工具声明:模型能调用的动作(8 个身体 + 3 个记忆)。
+"""工具声明:模型能调用的动作(9 个身体 + 3 个记忆)。
 
 说话不在这里——模型的文本输出就是说话(DESIGN.md Q13)。
-Schema 用 Gemini 原生风格(type 大写)。emote 名单和 look_pitch 开关
-来自运行时配置,所以声明由 build_tool_decls() 动态组装:
+Schema 用 Gemini 原生风格(type 大写)。emote 名单、look_pitch 与
+motion 开关来自运行时配置,所以声明由 build_tool_decls() 动态组装:
 - 没配置任何 emote 就不声明 emote 工具(别引诱模型调不存在的东西)
 - enable_look_pitch=false 时不声明 look_pitch
+- enable_motion=false 时不声明 motion(Avatar 没装木偶层就关)
 """
 
 from __future__ import annotations
 
 MOTION_TOOLS = frozenset(
-    {"move", "turn", "look_pitch", "jump", "set_run", "emote", "snapshot", "stop_all"}
+    {
+        "move", "turn", "look_pitch", "jump", "set_run", "emote",
+        "snapshot", "stop_all", "motion",
+    }
 )
 MEMORY_TOOLS = frozenset({"memory_search", "memory_read", "memory_write"})
 
 
 def build_tool_decls(
-    emote_names: list[str], enable_look_pitch: bool
+    emote_names: list[str], enable_look_pitch: bool, enable_motion: bool = True
 ) -> list[dict]:
     decls: list[dict] = [
         {
@@ -157,6 +161,62 @@ def build_tool_decls(
             },
         },
     ]
+
+    if enable_motion:
+        decls.insert(
+            3,
+            {
+                "name": "motion",
+                "description": (
+                    "身体姿态:躯干倾斜、双臂抬举,持续几秒后自动收势回自然"
+                    "站姿;期间说话走路不受影响。二选一:move 选预置动作,"
+                    "或直接给姿势轴(-1~1)自由组合摆姿势。手臂刻度:"
+                    "-1=垂在体侧,0=侧平举(T 姿),1=举过头顶。"
+                    "打招呼、指方向、表达情绪时主动用,让身体跟上话。"
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "move": {
+                            "type": "STRING",
+                            "enum": ["wave", "sway", "cheer", "stretch", "rest"],
+                            "description": (
+                                "wave=挥手打招呼 sway=左右摇摆 cheer=欢呼举双臂 "
+                                "stretch=伸懒腰 rest=立即收势"
+                            ),
+                        },
+                        "seconds": {
+                            "type": "NUMBER",
+                            "description": "持续秒数(0.5~60;不填用各动作默认)",
+                        },
+                        "lean_x": {
+                            "type": "NUMBER",
+                            "description": "躯干左右倾:-1 左 ~ 1 右",
+                        },
+                        "lean_z": {
+                            "type": "NUMBER",
+                            "description": "躯干前后倾:-1 后仰 ~ 1 前倾",
+                        },
+                        "arm_l_up": {
+                            "type": "NUMBER",
+                            "description": "左臂抬起:-1 垂下 0 平举 1 举过头",
+                        },
+                        "arm_r_up": {
+                            "type": "NUMBER",
+                            "description": "右臂抬起:-1 垂下 0 平举 1 举过头",
+                        },
+                        "arm_l_fwd": {
+                            "type": "NUMBER",
+                            "description": "左臂前伸:0 自然 1 前平举",
+                        },
+                        "arm_r_fwd": {
+                            "type": "NUMBER",
+                            "description": "右臂前伸:0 自然 1 前平举",
+                        },
+                    },
+                },
+            },
+        )
 
     if enable_look_pitch:
         decls.insert(

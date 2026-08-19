@@ -20,8 +20,8 @@ import math
 import time
 from pathlib import Path
 
+from .action.avatar_puppet import AvatarPuppet
 from .action.executor import SNAPSHOT_SENTINEL, ActionExecutor
-from .action.puppet import PuppetDriver
 from .action.speech import SpeechPipeline
 from .action.tools import MEMORY_TOOLS, build_tool_decls
 from .audio.capture import MicCapture
@@ -118,9 +118,9 @@ class Anima:
         self.history = History(cfg.brain.max_history_turns)
         self._summarizer: GeminiBrain | None = None  # 压缩用,首次触发时建
         self._last_prompt_tokens = 0
-        self.executor = ActionExecutor(self.motor, cfg.calibration, cfg.emotes)
-        self.puppet = PuppetDriver(
-            self.motor.send, cfg.puppet.height_m, cfg.puppet.rate_hz
+        self.puppet = AvatarPuppet(self.motor.send, cfg.puppet.rate_hz)
+        self.executor = ActionExecutor(
+            self.motor, cfg.calibration, cfg.emotes, puppet=self.puppet
         )
         self.speech = SpeechPipeline(
             self.motor,
@@ -133,7 +133,9 @@ class Anima:
         )
 
         decls = build_tool_decls(
-            sorted(cfg.emotes), cfg.calibration.enable_look_pitch
+            sorted(cfg.emotes),
+            cfg.calibration.enable_look_pitch,
+            cfg.puppet.motion_tool,
         )
         if self.memory is None:
             decls = [d for d in decls if d["name"] not in MEMORY_TOOLS]
@@ -547,7 +549,7 @@ class Anima:
         return "\n".join(lines)
 
     async def stop_actions(self) -> None:
-        self.puppet.calm()
+        self.puppet.rest()
         await self.executor.stop_everything()
 
     async def panic(self) -> None:

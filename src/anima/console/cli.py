@@ -21,7 +21,7 @@ HELP = """\
   mic             实时输入电平条(回车退出;显示电平/VAD 得分/说话段)
   turn <度数>      直接转身,不过大脑(正=右转,负=左转;标定用)
   cal             查看标定值;cal turn|look <值> 运行时调整(度/秒)
-  puppet          身体姿态实验(OSC Trackers):puppet on|off|sway|bob|height|rate
+  puppet          身体姿态(参数木偶):puppet <wave|sway|cheer|stretch> [秒] | pose 轴=值… | rest | off
   stop            立刻停止所有动作(清零所有轴)
   panic           急停:停动作 + 打断说话 + Avatar 安全模式
   mute on|off     开/关麦克风(OSC Voice)
@@ -215,64 +215,68 @@ class Console:
             flush=True,
         )
 
-    # ---------------------------------------------------------- 木偶实验
+    # ---------------------------------------------------------- 参数木偶
+
+    _PUPPET_USAGE = (
+        "用法:puppet(状态)| puppet <动作> [秒](动作:wave 挥手/sway 摇摆/"
+        "cheer 欢呼/stretch 伸懒腰)\n"
+        "     puppet pose <轴>=<值> … [秒](轴:lean_x lean_z arm_l_up "
+        "arm_r_up arm_l_fwd arm_r_fwd,值 -1~1)\n"
+        "     puppet rest(收势)| puppet off(立即断开)"
+    )
 
     def _puppet(self, rest: str) -> None:
-        """OSC Trackers 身体姿态实验(桌面模式接收与否要实机验证)。"""
+        """参数木偶(路线二):预置动作 / 自由摆姿势 / 收势。"""
         pup = self._app.puppet
         sub, _, arg = rest.partition(" ")
         sub, arg = sub.strip().lower(), arg.strip()
         if not sub:
             print(pup.status_text(), flush=True)
-        elif sub == "on":
-            pup.start()
-            print(
-                "木偶流送已开始(中立位)。进游戏快捷菜单 Calibrate FBT(T 姿)"
-                "后再试 puppet sway。",
-                flush=True,
-            )
-        elif sub == "off":
-            pup.request_stop()
-            print("正在淡回中立位,收敛后停止流送。", flush=True)
-        elif sub in ("height", "身高", "rate", "频率"):
-            self._puppet_set(sub, arg)
+        elif sub in ("off", "断"):
+            pup.panic_off()
+            print("木偶已断开(Puppet/On=0),身体还给游戏。", flush=True)
+        elif sub in ("rest", "收势"):
+            pup.rest()
+            print("收势中:淡回自然站姿后自动关闸。", flush=True)
+        elif sub in ("pose", "姿势"):
+            self._puppet_pose(pup, arg)
         else:
+            seconds = None
+            if arg:
+                try:
+                    seconds = float(arg.split()[0])
+                except ValueError:
+                    print(self._PUPPET_USAGE, flush=True)
+                    return
             try:
-                seconds = float(arg) if arg else None
-            except ValueError:
-                seconds = None
-            try:
-                played = pup.play(sub) if seconds is None else pup.play(sub, seconds)
+                played = pup.play(sub, seconds)
             except ValueError as e:
-                print(
-                    f"{e}\n用法:puppet [on|off|sway [秒]|bob [秒]"
-                    "|height <米>|rate <Hz>]",
-                    flush=True,
-                )
+                print(f"{e}\n{self._PUPPET_USAGE}", flush=True)
             else:
-                print(f"木偶动作 {sub} 开始,{played:g} 秒后自动回中立位。", flush=True)
+                print(f"木偶动作 {sub} 开始,约 {played:g} 秒后自动收势。", flush=True)
 
-    def _puppet_set(self, key: str, raw: str) -> None:
-        pup = self._app.puppet
+    def _puppet_pose(self, pup, arg: str) -> None:
+        targets: dict[str, float] = {}
+        seconds = None
+        for token in arg.split():
+            key, eq, raw = token.partition("=")
+            try:
+                if eq:
+                    targets[key] = float(raw)
+                else:
+                    seconds = float(token)
+            except ValueError:
+                print(self._PUPPET_USAGE, flush=True)
+                return
+        if not targets:
+            print(self._PUPPET_USAGE, flush=True)
+            return
         try:
-            value = float(raw)
-        except ValueError:
-            value = 0.0
-        if key in ("height", "身高"):
-            if not 0.5 <= value <= 2.5:
-                print("用法:puppet height <0.5~2.5>(米,与游戏内身高一致)", flush=True)
-                return
-            pup.height_m = value
-            print(
-                f"木偶身高 = {value:g}m(仅本次运行;满意后写进 config.toml 的 [puppet])",
-                flush=True,
-            )
+            played = pup.pose(targets, seconds)
+        except ValueError as e:
+            print(f"{e}\n{self._PUPPET_USAGE}", flush=True)
         else:
-            if not 10 <= value <= 100:
-                print("用法:puppet rate <10~100>(Hz)", flush=True)
-                return
-            pup.rate_hz = value
-            print(f"木偶流送频率 = {value:g}Hz(仅本次运行)", flush=True)
+            print(f"姿势已摆好,保持约 {played:g} 秒后自动收势。", flush=True)
 
     # ---------------------------------------------------------- 实时电平条
 

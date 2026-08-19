@@ -17,7 +17,7 @@
 
 | 参数名(一字不差) | 类型 | 含义 | -1 端 | +1 端 | 默认值 |
 |---|---|---|---|---|---|
-| `Puppet/On` | Bool | 木偶总开关 | — | — | false |
+| `Puppet/On` | Float | 木偶总开关(>0.5=开) | — | — | 0 |
 | `Puppet/LeanX` | Float | 躯干左右倾 | 左倾 | 右倾 | 0 |
 | `Puppet/LeanZ` | Float | 躯干前后倾 | 后仰 | 前倾 | 0 |
 | `Puppet/ArmL_Up` | Float | 左臂抬起 | 自然垂下 | 举过头顶 | **-1** |
@@ -28,9 +28,13 @@
 注意 `ArmUp` 的刻度:**0 = T 姿平举**(muscle 0 的天然含义),自然垂手在
 **-1**——所以这两个参数默认值要填 -1,躯干轴 0 就是直立不用管。
 
-同步成本:6×8 + 1 = **49 bits**(Avatar 总预算 256 bits)。
+> 修订(2026-08-20 实测):`On` 原设计是 Bool(只占 1 bit),但实机
+> OSC 拨 Bool 不生效、换 Float 立通(原因未查明,疑似类型桥接或缓存
+> 问题)——预算富余,**全按 Float 办**,过渡条件用 Greater/Less 0.5。
+
+同步成本:7×8 = **56 bits**(Avatar 总预算 256 bits)。
 v1 再加:`Twist`(转体)、`ElbowL/R`(屈肘)、`HandCurlL/R`(握拳)、
-`Bounce`(蹲弹)→ 满配 12 float + 1 bool = 97 bits。
+`Bounce`(蹲弹)→ 满配 13 float = 104 bits。
 
 ## 第 0 步:动工前检查(把结果发我)
 
@@ -48,8 +52,8 @@ v1 再加:`Twist`(转体)、`ElbowL/R`(屈肘)、`HandCurlL/R`(握拳)、
 
 **1a. Expression Parameters 资产**(网络同步声明):
 在第 0 步那个资产的 Inspector 里点 Add,逐行填上表 7 个参数——
-类型照表(Bool/Float),**Default 照表最后一列**(`ArmL_Up`/`ArmR_Up`
-填 **-1**,其余 0,`On` 填 false),**Saved = 关,Synced = 开**。
+**类型全部 Float**,**Default 照表最后一列**(`ArmL_Up`/`ArmR_Up`
+填 **-1**,其余 0),**Saved = 关,Synced = 开**。
 
 **1b. 动画控制器**(第 2 步建的那个):
 打开控制器(双击)→ 左上 **Parameters** 页签 → "+" → 同名同类型加 7 个。
@@ -102,9 +106,9 @@ muscle 系统接管,录制模式里在 Scene 手转骨骼会被直接弹回去,�
 6. 双击进每个子树:**Blend Type = 1D**,Parameter 选对应轴(如 `Puppet/LeanX`),
    Add Motion Field 两次,**取消勾选 Automate Thresholds**,手填阈值:
    **-1 放 `*_L` / `*_B` / `*_Min`,+1 放 `*_R` / `*_F` / `*_Max`**。
-7. 回到 `Puppet` 层:`Idle → Puppet` 拉 transition,条件 `Puppet/On` **true**;
-   `Puppet → Idle` 条件 **false**。两条都:**Has Exit Time 关**,
-   Settings 里 **Transition Duration 改 0.25**(淡入淡出)。
+7. 回到 `Puppet` 层:`Idle → Puppet` 拉 transition,条件 `Puppet/On`
+   **Greater 0.5**;`Puppet → Idle` 条件 **Less 0.5**。两条都:
+   **Has Exit Time 关**,Settings 里 **Transition Duration 改 0.25**(淡入淡出)。
 
 原理:Direct 树把 6 个 1D 子树的 muscle 曲线叠加——因为第 3 步保证了
 每轴只碰自己的骨头,叠加不冲突;参数 0 时每轴都落在两端中点=自然位。
@@ -126,17 +130,23 @@ Tracking Control 把 **Left Hand、Right Hand → Tracking**(还给 IK)。
 Tracking Control 各补一项 **Hip → Animation / Tracking**(**B 档**),
 重传对比。两档差异告诉我。
 
+**头要不要跟着身子倾**(可选,按喜好):默认头归游戏 IK,躯干倾斜时
+头会自动稳住原朝向——就是"身子动头不动"的既视感。想让头随身体走,
+在两个 Tracking Control 里各补一项 **Head**(`Puppet` 态 → Animation,
+`Idle` 态 → Tracking)重传即可。代价:木偶开着期间头不再跟随视线
+方向(转身不受影响,那是整个人在转)。
+
 ## 第 6 步:上传 + 验证(不用 bot 大脑,控制台就行)
 
 1. SDK 面板 Build & Publish,重传 Avatar,进游戏换上。
 2. bot 侧只要 Anima 在跑(游戏和她在同一台机器),控制台敲:
 
    ```
-   osc Puppet/On true
+   osc Puppet/On 1
    osc Puppet/ArmL_Up 0.8     ← 左臂应该抬起来
    osc Puppet/ArmL_Up -1
    osc Puppet/LeanX 0.6       ← 躯干右倾(A 档不动就等 B 档)
-   osc Puppet/On false        ← 应在 0.25 秒内回到正常站姿
+   osc Puppet/On 0            ← 应在 0.25 秒内回到正常站姿
    ```
 
 3. **逐轴校方向**(muscle 的正负号是按 Unity 命名规则推的,个别轴可能反):
@@ -153,12 +163,37 @@ Tracking Control 各补一项 **Hip → Animation / Tracking**(**B 档**),
    连续动的轴会有轻微台阶感(你自己那台的画面=本地视角,是丝滑的)。
    v1 加"远端平滑层"(VRCFT 生态的标准套路)解决,到时候我给你出。
 
-## 验证结果发我之后,我接着做
+## bot 侧后端(已就位,2026-08-20)
 
-- bot 侧参数木偶后端:现有 `PuppetDriver` 架构换个"地址后端"(trackers →
-  Puppet/* 参数),sway/呼吸/情绪摆动等程序化生成器和 `puppet` 控制台命令
-  全套迁过来,再把 `motion` 工具位接给大脑。
-- v1 扩轴 + 远端平滑层的 Unity 增补步骤。
+拉最新代码重启后,两条路都能动:
+
+**控制台手动**(不花 token):
+
+```
+puppet                                   ← 状态
+puppet wave                              ← 挥手 4 秒;还有 sway/cheer/stretch [可加秒数]
+puppet pose arm_r_up=0.8 lean_x=-0.3 5   ← 自由摆姿势,保持 5 秒
+puppet rest                              ← 收势(淡回自然站姿后自动关闸)
+puppet off                               ← 立即断开(急停)
+```
+
+**大脑自动**:模型多了一个 `motion` 工具——预置动作(wave 挥手 / sway
+摇摆 / cheer 欢呼 / stretch 伸懒腰 / rest 收势),或直接给 6 个轴自由
+摆姿势,到点自动收势。对她说"挥挥手""举起双手"试试。Avatar 没装
+木偶层的话,配置 `[puppet]` 里 `motion_tool = false` 关掉声明。
+
+接管协议(自动,无需操心):动作开始时先把所有轴归自然位再发
+`Puppet/On=1`(残留参数不闪现),全程指数平滑不跳变,动作结束淡回
+自然位、收敛后发 `On=0` 把身体还给游戏 IK。`stop_all` 工具和控制台
+`stop`/`panic` 都会连带收势。
+
+## 后面还做(v1)
+
+- 扩轴:`Twist`(转体)、`ElbowL/R`(屈肘)、`HandCurlL/R`(握拳)、
+  `Bounce`(蹲弹)→ 13 float = 104 bits,配 Unity 增补步骤。
+- 远端平滑层(修"别人看你"的 8-bit 台阶感,VRCFT 生态标准套路)。
+- `play_frames` 关键帧口接 text-to-motion provider(只做接口,不随
+  仓库分发权重)。
 
 ## 排错速查
 
@@ -170,4 +205,6 @@ Tracking Control 各补一项 **Hip → Animation / Tracking**(**B 档**),
 | 某轴方向反了 | 脚本 `Poses` 里那对数值全部取负,重跑菜单重传(见第 6 步) |
 | 一轴动、另一轴跟着歪 | 自己改 `Poses` 时两轴写了同一条 muscle(默认表不会) |
 | 手臂抬一半就被拽回去 | Tracking Control 没设 Animation,IK 还攥着手 |
-| `Puppet/On true` 后角色僵直 T 姿 | 某个 1D 子树没放 clip 或阈值没改成 -1/1 |
+| `Puppet/On` 开了角色僵直 T 姿 | 某个 1D 子树没放 clip 或阈值没改成 -1/1 |
+| `On` 用 Bool 拨不动 | 有环境 Bool 参数吃不到(实测):全改 Float,条件 Greater/Less 0.5 |
+| 身子倾了头钉在原地 | 游戏头部 IK 在稳头,正常;想让头跟身走见第 5 步 Head 附注 |

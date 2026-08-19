@@ -116,7 +116,7 @@ flowchart LR
 
 OSC 硬约束备忘:桌面模式**无法交互**(Use/Grab/Drop 全部 VR-Only)、无蹲伏;轴值不清零会永远走下去——执行器兜底看门狗:任何动作超时强制清零。
 
-**木偶层(v1.4 实验追加,非预设身体动作)**:经官方 OSC Trackers 协议(`/tracking/trackers/1..8/position|rotation` + `head` 对齐参考;Unity 左手系、+Y 向上、米制;旋转为欧拉角、按 Z→X→Y 应用)流送程序化身体姿态,任何 Avatar 免改造。先只送 head+髋+双脚——官方明说点越少 IK 补偿越好,这也是让 VRChat 自带 IK 替我们解算膝盖的取巧位。铁律:**姿态流必须连续**——一切目标切换经指数平滑,动作播完淡回中立位,永不发跳变(IK 吃到瞬移会抽风);panic 立即断流。桌面模式接收为社区实证、官方未文档化 ⚠️(§12 验证项)。验证通过后按三层长大:①连续通道层(本层,`PuppetDriver`)→ ②参数化生成器/关键帧层(`sway`/`bob` 等程序化函数;`play_frames()` 即 text-to-motion provider 接口位——文本→骨骼动作小模型的输出经"关节→追踪点"换算入场,权重不随仓库分发)→ ③模型侧 `motion` 工具(M2/M3 再暴露,呼应 Q10"接口为连续意图预留")。手臂/手指走路线二(Avatar 木偶参数,需一次性 Unity 改造),另立专章再做。**(2026-08-20 更新:无头显跑通本层的路子已判死——桌面模式无校准入口、假头显进 VR 后无任何菜单操作手段、校准不跨会话保存,详见 §12;本层代码保留给将来真 VR 硬件场景,身体动作现行路线=路线二,专章:`docs/avatar-puppet.md`。)**
+**木偶层(v1.4 实验追加,非预设身体动作)**:经官方 OSC Trackers 协议(`/tracking/trackers/1..8/position|rotation` + `head` 对齐参考;Unity 左手系、+Y 向上、米制;旋转为欧拉角、按 Z→X→Y 应用)流送程序化身体姿态,任何 Avatar 免改造。先只送 head+髋+双脚——官方明说点越少 IK 补偿越好,这也是让 VRChat 自带 IK 替我们解算膝盖的取巧位。铁律:**姿态流必须连续**——一切目标切换经指数平滑,动作播完淡回中立位,永不发跳变(IK 吃到瞬移会抽风);panic 立即断流。桌面模式接收为社区实证、官方未文档化 ⚠️(§12 验证项)。验证通过后按三层长大:①连续通道层(本层,`PuppetDriver`)→ ②参数化生成器/关键帧层(`sway`/`bob` 等程序化函数;`play_frames()` 即 text-to-motion provider 接口位——文本→骨骼动作小模型的输出经"关节→追踪点"换算入场,权重不随仓库分发)→ ③模型侧 `motion` 工具(M2/M3 再暴露,呼应 Q10"接口为连续意图预留")。手臂/手指走路线二(Avatar 木偶参数,需一次性 Unity 改造),另立专章再做。**(2026-08-20 更新:无头显跑通本层的路子已判死——桌面模式无校准入口、假头显进 VR 后无任何菜单操作手段、校准不跨会话保存,详见 §12;本层代码保留给将来真 VR 硬件场景,身体动作现行路线=路线二,专章:`docs/avatar-puppet.md`。)** **路线二 bot 侧已落地(2026-08-20,Unity 侧经用户实机验证全轴生效)**:`AvatarPuppet`(`anima/action/avatar_puppet.py`)流送 `Puppet/*` 参数——接管协议:所有轴先归自然位→`On=1`(残留参数不闪现),目标切换经指数平滑(τ=0.18s,20Hz),动作到点淡回自然位、收敛后 `On=0` 还身体给 IK;`On` 用 float 1/0(实测 Bool 经 OSC 拨不动);预置生成器 wave/sway/cheer/stretch(参数化连续函数,非动画片段)+ `pose()` 六轴自由姿势(手臂刻度 -1=垂下 0=T 姿 1=举过头)。模型侧新增第 9 个动作工具 `motion`(`[puppet].motion_tool` 可关),控制台 `puppet` 命令同源;`stop_all`/`panic` 连带收势。trackers 层 `PuppetDriver` 保留,不再接线。
 
 ## 5. 状态机与模式
 
@@ -222,6 +222,8 @@ stateDiagram-v2
 - [ ] 半双工模式下回声残留程度(决定是否提前上 AEC)
 - [ ] SenseVoice-small 在 VRChat 主机 CPU 上的实时率与嘈杂房间转写质量(定默认 STT 档位)
 - [x] OSC Trackers 无头显路线 **已判死(2026-08-20)**:桌面模式无 Calibrate FBT 入口(官方在无头显时隐藏全部 FBT 设置);SteamVR null driver 假头显能进 VR 模式(仅旧版 Build 22542555)但 **VR 模式无手柄就没有任何菜单操作手段**——鼠标/键盘/游戏手柄都没有指针(官方 feedback 挂着"No way to interact with menus using gamepad in VR mode"),Calibrate 永远点不到;且 FBT 校准**不跨会话保存**(官方特性请求开着,唯一实现是违 ToS 的 MelonLoader 模组),就算点到一次,bot 每次启动都得重演。就算再造假手柄(如 Monado qwerty 全栈换 SteamVR),VR 模式下双手永远绑死在静止假手柄上——比路线二还残。**结论:身体动作走路线二(Avatar 参数木偶,桌面模式原生);OSC Trackers 层代码保留,给将来真 VR 硬件场景用**
+- [x] 路线二 Unity 侧实机验证(2026-08-20):6 轴全部生效(A 档即可,躯干不用借 Hip);`On` 参数 Bool 经 OSC 拨不动 → 全 Float(1 bit→8 bit,总 56/256);"身子倾头不动"=游戏头部 IK 稳头,教程第 5 步给了可选 Head 跟随改法
+- [ ] 路线二 bot 侧实机:控制台 `puppet wave` / `puppet pose …` 动起来;对话里让她挥手→`motion` 工具触发;记录远端观感(8-bit 台阶)定 v1 平滑层优先级
 - [ ] 插话打断:bot 说话中旁人开口 ≥min_speech_ms 是否立即闭嘴并接话茬;若她"自己打断自己"(开口瞬间即被打断)说明该世界有自声回放,关 `[audio].barge_in`
 
 ## 附录 A · 决策记录(拷问会话 Q1–Q20)

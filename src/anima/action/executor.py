@@ -20,6 +20,7 @@ import logging
 from ..brain.base import ToolCall
 from ..config import CalibrationConfig, EmoteDef
 from ..osc.client import OscMotor
+from .avatar_puppet import AvatarPuppet
 
 log = logging.getLogger(__name__)
 
@@ -41,10 +42,12 @@ class ActionExecutor:
         motor: OscMotor,
         calibration: CalibrationConfig,
         emotes: dict[str, EmoteDef],
+        puppet: AvatarPuppet | None = None,
     ):
         self._motor = motor
         self._cal = calibration
         self._emotes = emotes
+        self._puppet = puppet
         self._tasks: dict[str, asyncio.Task] = {}
 
     # ------------------------------------------------------------ 调度
@@ -93,6 +96,8 @@ class ActionExecutor:
                 pass
         self._tasks.clear()
         self._motor.zero_all()
+        if self._puppet is not None:
+            self._puppet.rest()
 
     # ------------------------------------------------------------ 工具实现
 
@@ -182,6 +187,51 @@ class ActionExecutor:
 
         self._schedule("emote", run())
         return {"status": "ok", "detail": f"播放表情:{name}"}
+
+    def _t_motion(
+        self,
+        move: str | None = None,
+        seconds: float | None = None,
+        lean_x: float | None = None,
+        lean_z: float | None = None,
+        arm_l_up: float | None = None,
+        arm_r_up: float | None = None,
+        arm_l_fwd: float | None = None,
+        arm_r_fwd: float | None = None,
+    ) -> dict:
+        if self._puppet is None:
+            return {"status": "error", "detail": "木偶层未启用"}
+        given = {
+            "LeanX": lean_x,
+            "LeanZ": lean_z,
+            "ArmL_Up": arm_l_up,
+            "ArmR_Up": arm_r_up,
+            "ArmL_Fwd": arm_l_fwd,
+            "ArmR_Fwd": arm_r_fwd,
+        }
+        axes = {k: float(v) for k, v in given.items() if v is not None}
+        hold = None if seconds is None else float(seconds)
+        if move is not None and axes:
+            return {
+                "status": "error",
+                "detail": "move 和姿势轴一次只能用一种,分两次调用",
+            }
+        if move == "rest":
+            self._puppet.rest()
+            return {"status": "ok", "detail": "收势,回自然站姿"}
+        if move is not None:
+            played = self._puppet.play(str(move), hold)  # 未知名会 ValueError→回执
+            return {
+                "status": "ok",
+                "detail": f"动作 {move} 已开始,约 {played:g} 秒后自动收势",
+            }
+        if axes:
+            played = self._puppet.pose(axes, hold)
+            return {
+                "status": "ok",
+                "detail": f"姿势已摆好,保持约 {played:g} 秒后自动收势",
+            }
+        return {"status": "error", "detail": "要么给 move 预置动作,要么给至少一个姿势轴"}
 
     def _t_snapshot(self) -> dict:
         # 真正抓帧在 app 层(执行器不依赖屏幕);哨兵键会在入史前剥掉

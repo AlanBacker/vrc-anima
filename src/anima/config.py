@@ -165,9 +165,10 @@ class MemoryConfig:
 
 @dataclass
 class PuppetConfig:
-    # 木偶层(实验):经 OSC Trackers 流送身体姿态(控制台 puppet 命令)
-    height_m: float = 1.60       # 追踪空间身高,须与游戏内 User Real Height 一致
-    rate_hz: float = 50.0        # 姿态流送频率
+    # 参数木偶(路线二,docs/avatar-puppet.md):经 Puppet/* Avatar 参数驱动躯干双臂
+    motion_tool: bool = True     # 向模型声明 motion 工具(Avatar 没装木偶层就关掉)
+    rate_hz: float = 20.0        # 参数流送频率(本地观感的插值密度)
+    height_m: float = 1.60       # (预留)OSC Trackers 实验层身高;现行路线用不到
 
 
 @dataclass

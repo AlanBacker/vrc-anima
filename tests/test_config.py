@@ -152,11 +152,16 @@ def test_compress_validation(tmp_path):
 
 def test_puppet_defaults_and_validation(tmp_path):
     cfg = load(None)
-    assert cfg.puppet.height_m == 1.60
-    assert cfg.puppet.rate_hz == 50.0
+    assert cfg.puppet.motion_tool is True
+    assert cfg.puppet.rate_hz == 20.0
+    assert cfg.puppet.height_m == 1.60  # trackers 实验层预留
     p = tmp_path / "c.toml"
-    p.write_text("[puppet]\nheight_m = 1.72\nrate_hz = 30\n", encoding="utf-8")
+    p.write_text(
+        "[puppet]\nmotion_tool = false\nheight_m = 1.72\nrate_hz = 30\n",
+        encoding="utf-8",
+    )
     cfg = load(p)
+    assert cfg.puppet.motion_tool is False
     assert cfg.puppet.height_m == 1.72
     assert cfg.puppet.rate_hz == 30.0
     p.write_text("[puppet]\nheight_m = 3.0\n", encoding="utf-8")
