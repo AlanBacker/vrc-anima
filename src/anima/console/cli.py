@@ -25,6 +25,7 @@ HELP = """\
   stop            立刻停止所有动作(清零所有轴)
   panic           急停:停动作 + 打断说话 + Avatar 安全模式
   mute on|off     开/关麦克风(OSC Voice)
+  osc <参数> <值>  发一条裸 OSC(调 Avatar 参数用;可省 /avatar/parameters/ 前缀)
   say <文字>       让 Anima 直接说一句(测试 TTS 链路)
   cost            今日成本
   budget reset    预算清零(解除熔断)
@@ -37,7 +38,7 @@ HELP = """\
 
 class Console:
     """app 需要提供:status_text() / stop_actions() / panic() / set_mute(bool)
-    / say(text) / cost / memory(可为 None)/ executor / puppet / cfg
+    / say(text) / cost / memory(可为 None)/ executor / puppet / motor / cfg
     / history / compress_now() / request_shutdown()。"""
 
     def __init__(self, app):
@@ -105,6 +106,8 @@ class Console:
             else:
                 app.set_mute(rest == "on")
                 print("已静音。" if rest == "on" else "已开麦。", flush=True)
+        elif cmd in ("osc", "参数"):
+            self._osc_raw(rest)
         elif cmd in ("say", "说"):
             if not rest:
                 print("用法:say <要说的话>", flush=True)
@@ -156,6 +159,34 @@ class Console:
         else:
             print(f"未知命令:{cmd}(help 看帮助)", flush=True)
         return False
+
+    # ---------------------------------------------------------- 裸 OSC
+
+    def _osc_raw(self, rest: str) -> None:
+        """手动拨 Avatar 参数(如路线二木偶轴),不必等模型或后端出手。
+        true/false 发布尔,其余按 float 发;整型参数(如 VRCEmote)走 emote 映射。"""
+        addr, _, raw = rest.partition(" ")
+        raw = raw.strip()
+        if not addr or not raw:
+            print(
+                "用法:osc <参数名或完整地址> <数值|true|false>\n"
+                "例:osc Puppet/ArmL_Up 0.7(自动补 /avatar/parameters/ 前缀)",
+                flush=True,
+            )
+            return
+        if not addr.startswith("/"):
+            addr = "/avatar/parameters/" + addr
+        value: bool | float
+        if raw.lower() in ("true", "false"):
+            value = raw.lower() == "true"
+        else:
+            try:
+                value = float(raw)
+            except ValueError:
+                print("值要是数字或 true/false。", flush=True)
+                return
+        self._app.motor.send(addr, value)
+        print(f"已发送 {addr} = {value}", flush=True)
 
     # ---------------------------------------------------------- 转身标定
 

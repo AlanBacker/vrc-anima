@@ -11,6 +11,7 @@ from anima.brain.base import (
     BrainReply,
     TokenUsage,
     ToolCall,
+    ToolResultTurn,
     UserTurn,
 )
 from anima.brain.history import History
@@ -272,3 +273,19 @@ def test_utterance_queue_drops_oldest_when_full():
     app._enqueue_utterance("三")
     assert app._utterances.get_nowait() == "二"
     assert app._utterances.get_nowait() == "三"
+
+
+def test_tool_exception_still_pairs_function_response():
+    """工具炸了也要补配对的 functionResponse:少一条配对,
+    之后每一回合都过不了 Gemini 3 强校验(连环 400 直到重启)。"""
+    app = _make_app([_reply(tools=["jump"]), _reply(text="哎呀,腿软了")])
+
+    def boom(call):
+        raise RuntimeError("OSC 断了")
+
+    app.executor.dispatch = boom
+    asyncio.run(app._brain_cycle(depth=0))
+    results = [t for t in app.history.turns if isinstance(t, ToolResultTurn)]
+    assert len(results) == 1
+    assert results[0].result["status"] == "error"
+    assert app.brain.calls == 2  # 追问照常,让她能对失败说句话

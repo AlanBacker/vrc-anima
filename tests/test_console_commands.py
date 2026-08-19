@@ -164,3 +164,36 @@ async def test_puppet_height_rate_set_and_reject(capsys):
     await console._dispatch("puppet rate 5")
     assert app.puppet.height_m == 1.72 and app.puppet.rate_hz == 30.0
     assert "用法" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ 裸 OSC
+
+
+def _osc_app():
+    sent = []
+    app = SimpleNamespace(motor=SimpleNamespace(send=lambda a, v: sent.append((a, v))))
+    return app, sent
+
+
+async def test_osc_sends_float_with_prefix(capsys):
+    app, sent = _osc_app()
+    await Console(app)._dispatch("osc Puppet/ArmL_Up 0.7")
+    assert sent == [("/avatar/parameters/Puppet/ArmL_Up", 0.7)]
+    assert "已发送" in capsys.readouterr().out
+
+
+async def test_osc_bool_and_full_address():
+    app, sent = _osc_app()
+    console = Console(app)
+    await console._dispatch("osc Puppet/On true")
+    await console._dispatch("osc /input/Jump false")
+    assert sent == [("/avatar/parameters/Puppet/On", True), ("/input/Jump", False)]
+
+
+async def test_osc_rejects_garbage(capsys):
+    app, sent = _osc_app()
+    console = Console(app)
+    await console._dispatch("osc")
+    await console._dispatch("osc Puppet/On maybe")
+    assert sent == []
+    assert "用法" in capsys.readouterr().out

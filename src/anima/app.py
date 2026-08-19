@@ -355,12 +355,21 @@ class Anima:
         )
 
         for call in reply.tool_calls:
-            result = await self._run_tool(call)
             frame_hi = None
-            if isinstance(result, dict) and result.pop(SNAPSHOT_SENTINEL, False):
-                frame_hi = await self.screen.agrab_jpeg(SNAPSHOT_PX)
-                if frame_hi is None:
-                    result = {"status": "error", "detail": "抓屏失败,拍不了照片"}
+            try:
+                result = await self._run_tool(call)
+                if not isinstance(result, dict):
+                    result = {"status": "ok", "detail": str(result)}
+                if result.pop(SNAPSHOT_SENTINEL, False):
+                    frame_hi = await self.screen.agrab_jpeg(SNAPSHOT_PX)
+                    if frame_hi is None:
+                        result = {"status": "error", "detail": "抓屏失败,拍不了照片"}
+            except Exception:
+                # 工具炸了也必须补上配对的 functionResponse:历史里的
+                # functionCall 一旦缺响应,之后每一回合都过不了强校验,
+                # 400 会一直连环到重启
+                log.exception("工具 %s 执行异常", call.name)
+                result = {"status": "error", "detail": "执行时出了内部错误"}
             log.info(
                 "动作 %s%s → %s",
                 call.name,
