@@ -36,7 +36,9 @@ def test_trim_starts_at_user_turn():
     assert sum(isinstance(t, UserTurn) for t in turns) == 2
 
 
-def test_tool_result_renders_as_tool_role():
+def test_tool_result_renders_as_user_role():
+    """functionResponse 回传角色必须是 user(SDK 同款):Gemini 3 系把
+    非 user 角色当模型回合,请求以它收尾直接 400(实机 jump 后追问触发过)。"""
     h = History()
     h.add(UserTurn(text="看看周围"))
     h.add(AssistantTurn(text="我看看", tool_calls=[ToolCall("snapshot", {}, "id1")]))
@@ -47,11 +49,11 @@ def test_tool_result_renders_as_tool_role():
     )
     rendered = h.render()
     roles = [c["role"] for c in rendered]
-    assert roles == ["user", "model", "tool", "user"]
+    assert roles == ["user", "model", "user", "user"]
     # model 内容带 functionCall
     call = next(p["call"] for p in rendered[1]["parts"] if "call" in p)
     assert call["name"] == "snapshot" and call["id"] == "id1"
-    # tool 内容带 functionResponse
+    # 工具结果内容带 functionResponse
     resp = next(p["resp"] for p in rendered[2]["parts"] if "resp" in p)
     assert resp["name"] == "snapshot" and resp["result"] == {"status": "ok"}
     # 高清帧独立成一条 user 内容,且作为最新帧被保留
@@ -101,11 +103,13 @@ def test_parallel_tool_results_merge_into_one_content():
     h.add(ToolResultTurn("move", {"ok": True}, "c1"))
     h.add(ToolResultTurn("jump", {"ok": True}, "c2", frame_jpeg=b"jpg"))
     contents = h.render()
-    tool_contents = [c for c in contents if c["role"] == "tool"]
-    assert len(tool_contents) == 1
-    resps = [p["resp"] for p in tool_contents[0]["parts"]]
+    resp_contents = [
+        c for c in contents if any("resp" in p for p in c["parts"])
+    ]
+    assert len(resp_contents) == 1
+    resps = [p["resp"] for p in resp_contents[0]["parts"]]
     assert [r["id"] for r in resps] == ["c1", "c2"]  # 顺序与 call 一致
-    # 快照帧仍是独立的 user 内容,跟在合并后的 tool 内容之后
+    # 快照帧仍是独立的 user 内容,跟在合并后的结果内容之后
     assert contents[-1]["role"] == "user"
     assert contents[-1]["parts"][-1] == {"jpeg": b"jpg"}
 
@@ -116,8 +120,21 @@ def test_single_tool_result_shape_unchanged():
     h.add(AssistantTurn(tool_calls=[ToolCall("jump", {}, "c1")]))
     h.add(ToolResultTurn("jump", {"ok": True}, "c1"))
     contents = h.render()
-    assert contents[-1]["role"] == "tool"
+    assert contents[-1]["role"] == "user"
     assert len(contents[-1]["parts"]) == 1
+
+
+def test_memory_index_not_mixed_into_function_response():
+    """历史以工具结果收尾时,记忆索引另起一条 user 内容——
+    functionResponse 内容要纯(强校验按 call/resp 部件数对账)。"""
+    h = History()
+    h.add(UserTurn(text="跳"))
+    h.add(AssistantTurn(tool_calls=[ToolCall("jump", {}, "c1")]))
+    h.add(ToolResultTurn("jump", {"ok": True}, "c1"))
+    contents = h.render(memory_index="- [note](note.md) — 钩子")
+    assert [p.keys() for p in contents[-2]["parts"]] == [{"resp"}]  # 只有 resp
+    assert contents[-1]["role"] == "user"
+    assert "记忆索引" in contents[-1]["parts"][0]["text"]
 
 
 # ------------------------------------------------------------------ 压缩

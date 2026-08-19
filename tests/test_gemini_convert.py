@@ -18,14 +18,14 @@ def test_roles_and_parts_translate():
             ],
         },
         {
-            "role": "tool",
+            "role": "user",
             "parts": [
                 {"resp": {"name": "snapshot", "result": {"status": "ok"}, "id": "c1"}}
             ],
         },
     ]
     out = to_genai_contents(contents, types)
-    assert [c.role for c in out] == ["user", "model", "tool"]
+    assert [c.role for c in out] == ["user", "model", "user"]
     assert out[0].parts[0].text == "[听到] 你好"
     blob = out[0].parts[1].inline_data
     assert blob.mime_type == "image/jpeg" and blob.data == b"\xff\xd8x"
